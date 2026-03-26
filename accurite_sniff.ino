@@ -284,6 +284,20 @@ void My_ISR() {
 
 
 //----------------------------------------------------
+#define OOK_FIXED_THRESHOLD 15
+#define RADIOLIB_STATE(STATEVAR, FUNCTION)                              \
+{                                                                     \
+  if ((STATEVAR) == RADIOLIB_ERR_NONE) {                              \
+    Serial.printf(" " FUNCTION " - success!\n");     \
+  } else {                                                            \
+    Serial.printf(" " FUNCTION " failed, code: %d\n", \
+                STATEVAR);                                            \
+    while (true)                                                      \
+      ;                                                               \
+  }                                                                   \
+}
+
+uint8_t OokFixedThreshold = OOK_FIXED_THRESHOLD;
 
 void RadioSetup() {
 
@@ -311,27 +325,50 @@ void RadioSetup() {
   //						 int8_t power = 10, 
   //						 uint16_t preambleLength = 16,
   //						 bool enableOOK = false;
-  int state = radio.beginFSK(434.0,	// freq
-  							 1.2,	// bitrate
-  							 20.0,	// fsk dev
-  							 250.0,	// rxbw khz
-  							 2.0,	// txpower
-  							 8,		// fsk preamble bits.
-  							 true	// enable ook
-  							 );
-  							 
-  if (state == RADIOLIB_ERR_NONE) {
-    Serial.println(F("success!"));
-  } else {
-    Serial.print(F("failed, code "));
-    Serial.println(state);
-    while (true) { delay(10); }
-  }
-  delay(3000);	
-  // set function that will be called each time a bit is received
-  radio.setDirectAction(My_ISR);
+	int state = radio.beginFSK(434.0,	// freq
+								 1.2,	// bitrate
+								 20.0,	// fsk dev
+								 250.0,	// rxbw khz
+								 2.0,	// txpower
+								 8,		// fsk preamble bits.
+								 true	// enable ook
+								 );
+								 
+	if (state == RADIOLIB_ERR_NONE) {
+		Serial.println(F("success!"));
+	} else {
+		Serial.print(F("failed, code "));
+		Serial.println(state);
+	while (true) { delay(10); }
+	}
+	
+	delay(3000);	
+	// set function that will be called each time a bit is received
+	radio.setDirectAction(My_ISR);
 
-  // start direct mode reception
-  radio.receiveDirect();
+	state = radio.setDataShapingOOK(2); // Default 0 ( 0, 1, 2 )
+	RADIOLIB_STATE(state, "setDataShapingOOK");
+
+	state = radio.setOokThresholdType(
+	    RADIOLIB_SX127X_OOK_THRESH_PEAK); // Peak is default
+	RADIOLIB_STATE(state, "OOK Thresh PEAK");
+
+	state = radio.setOokPeakThresholdDecrement(
+	    RADIOLIB_SX127X_OOK_PEAK_THRESH_DEC_1_1_CHIP); // default
+	RADIOLIB_STATE(state, "OOK PEAK Thresh Decrement");
+
+	state = radio.setOokPeakThresholdStep(
+	    RADIOLIB_SX127X_OOK_PEAK_THRESH_STEP_0_5_DB); // default
+	RADIOLIB_STATE(state, "Ook Peak Threshold Step");
+
+	state = radio.setOokFixedOrFloorThreshold(
+	    OokFixedThreshold); // Default 0x0C RADIOLIB_SX127X_OOK_FIXED_THRESHOLD
+	RADIOLIB_STATE(state, "OokFixedThreshold");
+
+	state = radio.setBitRate(1.2);
+	RADIOLIB_STATE(state, "setBitRate");
+
+	// start direct mode reception
+	radio.receiveDirect();
 }
 

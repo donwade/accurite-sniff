@@ -1,6 +1,12 @@
 #include <Wire.h>
-#include <LiquidCrystal_I2C.h>
-#include <avr/eeprom.h>
+//#include <LiquidCrystal_I2C.h>
+//#include <avr/eeprom.h>
+
+#define EEMEM
+
+#include "M5Unified.h"
+#include "M5GFX.h"
+
 
 // === Receiver Code Constants and Variables ===
 
@@ -35,9 +41,9 @@ unsigned int EEMEM raincounter_persist;
 #define MARKER 0x5AA5
 unsigned int EEMEM eeprom_marker = MARKER;
 
-// === Display ===
+// === Lcd ===
 
-LiquidCrystal_I2C lcd(0x27, 16, 2);
+//LiquidCrystal_I2C Lcd(0x27, 16, 2);
 
 // === Variables to hold latest decoded data ===
 float latestWindspeed = -1;      // km/h
@@ -46,7 +52,7 @@ float latestTemperature = -1000; // sentinel invalid temp (C)
 
 // Timing for LCD updates
 unsigned long lastLcdUpdate = 0;
-const unsigned long lcdUpdateInterval = 1000; // ms
+const unsigned long LcdUpdateInterval = 1000; // ms
 
 // === Helper Functions ===
 
@@ -96,16 +102,17 @@ void My_ISR();
 // === Setup ===
 
 void setup() {
-  Serial.begin(9600);
-  lcd.init();
-  lcd.backlight();
-  lcd.clear();
-  lcd.setCursor(3, 0);
-  lcd.print("WeatherSys");
-  lcd.setCursor(5, 1);
-  lcd.print("Starting");
+  Serial.begin(155200);
+  M5.begin();
+  M5.Lcd.init();
+  ///M5.Lcd.backlight();
+  M5.Lcd.clear();
+  M5.Lcd.setCursor(3, 0);
+  M5.Lcd.print("WeatherSys");
+  M5.Lcd.setCursor(5, 1);
+  M5.Lcd.print("Starting");
   delay(1500);
-  lcd.clear();
+  M5.Lcd.clear();
 
   pinMode(PIN, INPUT);
   attachInterrupt(digitalPinToInterrupt(PIN), My_ISR, CHANGE);
@@ -141,40 +148,40 @@ void loop() {
   }
 
   unsigned long now = millis();
-  if (now - lastLcdUpdate > lcdUpdateInterval) {
+  if (now - lastLcdUpdate > LcdUpdateInterval) {
     lastLcdUpdate = now;
 
-    lcd.clear();
+    M5.Lcd.clear();
 
     // Line 1: wind speed km/h and knots (e.g. "15.9km/h  8.6knt")
-    lcd.setCursor(0, 0);
+    M5.Lcd.setCursor(0, 0);
     if (latestWindspeed >= 0) {
-      lcd.print(latestWindspeed, 1);
-      lcd.print("km/h ");
+      M5.Lcd.print(latestWindspeed, 1);
+      M5.Lcd.print("km/h ");
 
       float knots = kphToKnots(latestWindspeed);
-      lcd.print(knots, 1);
-      lcd.print("knt");
+      M5.Lcd.print(knots, 1);
+      M5.Lcd.print("knt");
     } else {
-      lcd.print("--.-km/h --.-knt");
+      M5.Lcd.print("--.-km/h --.-knt");
     }
 
     // Line 2: wind direction degrees + cardinal + temperature if available
-    lcd.setCursor(0, 1);
+    M5.Lcd.setCursor(0, 1);
     if (latestWindDirection >= 0) {
-      lcd.print((int)latestWindDirection);
-      lcd.write(223); // degree symbol
-      lcd.print(" ");
-      lcd.print(degreesToCompass(latestWindDirection));
+      M5.Lcd.print((int)latestWindDirection);
+      M5.Lcd.write(223); // degree symbol
+      M5.Lcd.print(" ");
+      M5.Lcd.print(degreesToCompass(latestWindDirection));
     } else {
-      lcd.print("No Wind Dir");
+      M5.Lcd.print("No Wind Dir");
     }
 
     if (latestTemperature > -100) {
-      lcd.print(" T ");
-      lcd.print((int)latestTemperature);
-      lcd.write(223);
-      lcd.print("C");
+      M5.Lcd.print(" T ");
+      M5.Lcd.print((int)latestTemperature);
+      M5.Lcd.write(223);
+      M5.Lcd.print("C");
     }
   }
 }

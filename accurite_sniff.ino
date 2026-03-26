@@ -1,7 +1,4 @@
-#define RADIOLIB_LOW_LEVEL 1
-#include <RadioLib.h>
-
-#include <Wire.h>
+//#include <Wire.h>
 //#include <LiquidCrystal_I2C.h>
 //#include <avr/eeprom.h>
 
@@ -9,6 +6,9 @@
 
 #include "M5Unified.h"
 #include "M5GFX.h"
+
+//#define RADIOLIB_LOW_LEVEL 1
+//#include <RadioLib.h>
 
 
 // === Receiver Code Constants and Variables ===

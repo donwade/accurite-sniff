@@ -21,6 +21,8 @@
   rtl_433 - subset of rtl_433 package
 
 */
+#define RADIOLIB_GODMODE 1
+#define RADIOLIB_LOW_LEVEL 1
 
 #include "receiver.h"
 #include <rtl_433_ESP.h>

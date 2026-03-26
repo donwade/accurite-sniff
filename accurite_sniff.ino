@@ -117,6 +117,7 @@ float kphToKnots(float kph) {
 
 // === ISR prototype ===
 void My_ISR();
+uint32_t isrCtr = 0;
 
 // === Setup ===
 
@@ -126,14 +127,34 @@ void setup() {
   M5.Lcd.init();
   M5.Lcd.clear();
   M5.Lcd.setCursor(3, 0);
+  
+  M5.Lcd.setTextColor(TFT_YELLOW);
+  M5.Lcd.setTextSize(2);
+  M5.Lcd.setTextWrap(false); 
+	
   M5.Lcd.print("WeatherSys");
   M5.Lcd.setCursor(5, 1);
   M5.Lcd.print("Starting");
   delay(1500);
   M5.Lcd.clear();
+  RadioSetup();
 
   pinMode(DI02, INPUT);
   attachInterrupt(digitalPinToInterrupt(DI02), My_ISR, CHANGE);
+
+  uint8_t pin;
+  uint8_t cnt =100;
+  uint32_t now = millis();
+  Serial.println("waiting for DIO2 to move");
+
+  while(cnt)
+  {
+	  pin = digitalRead(DI02);
+	  while (pin == digitalRead(DI02));
+	  cnt--;
+  }	  
+  Serial.printf("pass: DI02 %d samples in %d ms\n", isrCtr, millis() - now);
+  
 }
 
 // === Main Loop ===
@@ -208,7 +229,8 @@ void loop() {
 
 void My_ISR() {
   unsigned long timestamp = micros();
-
+  isrCtr++;
+  
   if (digitalRead(DI02) == HIGH) {
     if (timestamp - risets > 10000) {
       state = RESET;
@@ -267,7 +289,37 @@ void RadioSetup() {
 
   // initialize SX1278 with FSK modem at 9600 bps
   Serial.print(F("[SX1278] Initializing ... "));
-  int state = radio.beginFSK(434.0, 9.6, 20.0);
+
+  /*!
+	\brief FSK modem initialization method. Must be called at least once from Arduino sketch to initialize the module.
+	\param freq Carrier frequency in MHz. Allowed values range from 137.0 MHz to 1020.0 MHz.
+	\param br Bit rate of the FSK transmission in kbps (kilobits per second). Allowed values range from 1.2 to 300.0 kbps.
+	\param freqDev Frequency deviation of the FSK transmission in kHz. Allowed values range from 0.6 to 200.0 kHz.
+	Note that the allowed range changes based on bit rate setting, so that the condition FreqDev + BitRate/2 <= 250 kHz is always met.
+	\param rxBw Receiver bandwidth in kHz. Allowed values are 2.6, 3.1, 3.9, 5.2, 6.3, 7.8, 10.4, 12.5, 15.6, 20.8, 25, 31.3, 41.7, 50, 62.5, 83.3, 100, 125, 166.7, 200 and 250 kHz.
+	\param power Transmission output power in dBm. Allowed values range from 2 to 17 dBm.
+	\param preambleLength Length of FSK preamble in bits.
+	\param enableOOK Use OOK modulation instead of FSK.
+	\returns \ref status_codes
+  */
+
+  
+  //                         float freq = 434.0, 
+  //						 float br = 4.8, 
+  //						 float freqDev = 5.0, 
+  //						 float rxBw = 125.0, 
+  //						 int8_t power = 10, 
+  //						 uint16_t preambleLength = 16,
+  //						 bool enableOOK = false;
+  int state = radio.beginFSK(434.0,	// freq
+  							 1.2,	// bitrate
+  							 20.0,	// fsk dev
+  							 250.0,	// rxbw khz
+  							 2.0,	// txpower
+  							 8,		// fsk preamble bits.
+  							 true	// enable ook
+  							 );
+  							 
   if (state == RADIOLIB_ERR_NONE) {
     Serial.println(F("success!"));
   } else {
@@ -275,7 +327,7 @@ void RadioSetup() {
     Serial.println(state);
     while (true) { delay(10); }
   }
-
+  delay(3000);	
   // set function that will be called each time a bit is received
   radio.setDirectAction(My_ISR);
 

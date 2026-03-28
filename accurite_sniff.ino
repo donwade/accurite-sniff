@@ -8,12 +8,21 @@
 
 #define LINE Serial.printf("%s:%d %s\n", __FILE__,__LINE__,__FUNCTION__)
 
+#define FG_DONE 	  "\033[0m" 
+#define FG_RED        "\033[0;31m" 
+#define FG_GREEN      "\033[0;32m" 
+#define FG_YELLOW     "\033[0;33m" 
+#define FG_BLUE       "\033[0;34m" 
+#define FG_MAGENTA    "\033[0;35m" 
+#define FG_CYAN       "\033[0;36m" 
+#define FG_WHITE      "\033[0;37m" 
+
 //------------------------------------------------------------------
 void RadioSetup();
 // include the library
 #include <RadioLib.h>
 
-uint16_t bNeedBeep = 0;
+uint16_t soundBeep = 0;
 
 // SX1276 has the following connections:
 #define NSS     27
@@ -29,6 +38,13 @@ SX1276 radio = new Module(NSS,      /*NSS*/
 
 const int DI02 = 25;
 //------------------------------------------------------------------
+#define BUCKET_SIZE 20
+uint16_t bucketHi[BUCKET_SIZE];
+uint16_t bucketLo[BUCKET_SIZE];
+bool bStopRecording = false;
+
+#define LIM_LO 100
+#define LIM_HI 900
 
 
 #define EEMEM
@@ -49,7 +65,7 @@ const float winddirections[] = { 315.0, 247.5, 292.5, 270.0,
 
 // Variables for decoding
 volatile unsigned int pulsecnt = 0;
-volatile unsigned long risets = 0;
+volatile unsigned long lastTime = 0;
 volatile unsigned int syncpulses = 0;
 volatile byte state = 0;
 volatile byte buf[8] = { 0 };
@@ -146,7 +162,18 @@ volatile uint32_t isrCtr = 0;
 void setup()
 {
     Serial.begin(115200);
+
     M5.begin();
+
+	auto cfg = M5.config();
+	
+	// Set the items you want to configure. Omit the following two lines if you use the default settings.
+	cfg.serial_baudrate = 115200;
+	cfg.output_power = true;
+	
+	M5.begin(cfg);
+
+    
     M5.Lcd.init();
     M5.Lcd.clear();
     M5.Lcd.setCursor(3, 0);
@@ -163,6 +190,7 @@ void setup()
 
     pinMode(DI02, INPUT);
     attachInterrupt(digitalPinToInterrupt(DI02), My_ISR, CHANGE);
+
 
     RadioSetup();
     findFloor();
@@ -222,12 +250,14 @@ void loop()
 	{
 		ok = 0;
 		Serial.printf("%d vs %d \n", pulsecnt, isrCtr);
+		report(FG_GREEN "hi stats", bucketHi);
+		report(FG_RED "lo stats", bucketLo);
 	}
 
-	if (bNeedBeep)
+	if (soundBeep)
 	{
-		bNeedBeep = 0;
-		M5.Speaker.tone(bNeedBeep, 100);
+		soundBeep = 0;
+		M5.Speaker.tone(soundBeep, 100);
 	}
 	
     if (bucketFull)
@@ -238,6 +268,8 @@ void loop()
 
         if (valid)
         {
+
+        	soundBeep = 500;
             int msgtype = (buf[2] & 0x3F);
 
             // Decode wind speed
@@ -302,28 +334,88 @@ void loop()
     }
 }
 
+//==============================================================
+void report(char *msg, uint16_t *bucket)
+{
+	Serial.printf("\n%s -----\n", msg);
+	for(int i = 1; i < BUCKET_SIZE-1; i++)
+	{
+		//reverse map.
+		// show values of buckets.
+		uint16_t undo = map(i, 1, BUCKET_SIZE-2, LIM_LO, LIM_HI);
+		Serial.printf(" %03d  ", undo);
+	}
+	Serial.println();
+
+	for(int i = 1; i < BUCKET_SIZE-1; i++)
+	{
+		//reverse map.
+		// show values.
+		Serial.printf("%05d ", bucket[i]);
+		if (bucket[i] > 99990) bStopRecording = true;
+	}
+	Serial.println(FG_DONE);
+	Serial.println();
+}
+
 
 // === ISR ===
 void My_ISR()
 {
     unsigned long now = micros();
 
+	bool pinState = digitalRead(DI02);
+    unsigned long duration = now - lastTime;
+    
     isrCtr++;
 
-    if (digitalRead(DI02) == HIGH)
+    if (pinState == HIGH)  // just went hi, so time represents lo time.
     {
-        if (now - risets > 10000)
+        if (now - lastTime > 10000)
         {
             state = RESET;
             syncpulses = 0;
             pulsecnt = 0;
         }
 
-        risets = now;
+        lastTime = now;
         return;
     }
 	
-    unsigned long duration = now - risets;
+
+	//--------------
+	if (!bStopRecording)
+	{
+		if (duration >= LIM_LO && duration <= LIM_HI)
+		{
+			uint16_t idx;
+			idx = map(duration, LIM_LO, LIM_HI, 1, BUCKET_SIZE-2);
+			if (!pinState)
+			{
+				bucketHi[idx]++;
+			}
+			else
+			{
+				bucketLo[idx]++;
+			}
+		}
+		else
+		{
+			// out of bounds.
+			if (!pinState)
+			{
+				if (duration > LIM_HI) bucketHi[BUCKET_SIZE-1]++;
+				if (duration < LIM_LO) bucketHi[0]++;
+			}
+			else
+			{
+				if (duration > LIM_HI) bucketLo[BUCKET_SIZE-1]++;
+				if (duration < LIM_LO) bucketLo[0]++;
+			}
+		}
+	}
+	//--------------
+	
 
     if (state == RESET || state == INSYNC)
     {
@@ -459,6 +551,11 @@ void findFloor(void)
 uint8_t OokFixedThreshold = OOK_FIXED_THRESHOLD;
 void RadioSetup()
 {
+	// power off for reset
+	M5.Power.setExtPower(false); // TIP
+	delay(1000);
+	M5.Power.setExtPower(true);  // TIP
+	
 
     // initialize SX1278 with FSK modem at 9600 bps
     Serial.print(F("[SX1278] Initializing ... "));
@@ -511,6 +608,9 @@ void RadioSetup()
     state = radio.setBitRate(4.8);
     RADIOLIB_STATE(state, "setBitRate");
 
+	state = radio.setGain(0); //0=autogain 1=max 5=low
+    RADIOLIB_STATE(state, "setGain(max)");
+	
     // set function that will be called each time a bit is received
     radio.setDirectAction(My_ISR);
 

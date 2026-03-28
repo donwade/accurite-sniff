@@ -4,7 +4,9 @@
 
 #include <M5Unified.h>
 #include <M5GFX.h>
+#include "DisplayPage.hpp"
 
+#define LINE Serial.printf("%s:%d %s\n", __FILE__,__LINE__,__FUNCTION__)
 
 //------------------------------------------------------------------
 void RadioSetup();
@@ -49,7 +51,7 @@ volatile unsigned long risets = 0;
 volatile unsigned int syncpulses = 0;
 volatile byte state = 0;
 volatile byte buf[8] = { 0 };
-volatile bool reading = false;
+volatile bool bucketFull = false;
 
 #define RESET 0
 #define INSYNC 1
@@ -135,7 +137,9 @@ float kphToKnots(float kph)
 
 // === ISR prototype ===
 void My_ISR();
-uint32_t isrCtr = 0;
+
+volatile uint32_t isrCtr = 0;
+
 // === Setup ===
 void setup()
 {
@@ -146,18 +150,20 @@ void setup()
     M5.Lcd.setCursor(3, 0);
 
     M5.Lcd.setTextColor(TFT_YELLOW);
-    M5.Lcd.setTextSize(2);
+    M5.Lcd.setTextSize(3);
     M5.Lcd.setTextWrap(false);
 
-    M5.Lcd.print("WeatherSys");
+    lprintf("WeatherSys");
     M5.Lcd.setCursor(5, 1);
-    M5.Lcd.print("Starting");
+    lprintf("Starting");
     delay(1500);
     M5.Lcd.clear();
-    RadioSetup();
 
     pinMode(DI02, INPUT);
     attachInterrupt(digitalPinToInterrupt(DI02), My_ISR, CHANGE);
+
+    RadioSetup();
+    findFloor();
 
     uint8_t pin;
     uint8_t cnt = 100;
@@ -170,13 +176,12 @@ void setup()
         while (pin == digitalRead(DI02));
         cnt--;
     }
-
-    Serial.printf("pass: DI02 %d samples in %d ms\n", isrCtr, millis() - now);
+    Serial.printf("pass: DI02 %d samples in %d ms\n", isrCtr, millis() - now);  
 
 }
 
 
-#define HISTLEN (1 << 8)
+#define HISTLEN 1024
 uint16_t rssiIndex = 0;
 int8_t rssiHistory[HISTLEN];
 
@@ -187,7 +192,9 @@ float rssiLo = 0;
 // === Main Loop ===
 void loop()
 {
-
+	yield();
+#if 0
+	// NO NO NO 
     float rssiNow = radio.getRSSI();
 	
     if (rssiHi < rssiNow)
@@ -201,17 +208,25 @@ void loop()
     if (rssiIndex == HISTLEN)
     {
         rssiIndex = 0;
-        Serial.printf("rssi Hi = %.1f Lo = %.1f \n", rssiHi, rssiLo);
+        Serial.printf("rssi Hi = %6.1f Lo = %6.1f Delta = %5.1f\n", rssiHi, rssiLo, rssiHi - rssiLo);
 
 		rssiHi = -999;
 		rssiLo = 0;
     }
+#endif
 
-    if (reading)
+	static uint32_t ok;
+	if (100000 < ok++) 
+	{
+		ok = 0;
+		Serial.printf("%d vs %d \n", pulsecnt, isrCtr);
+	}
+	
+    if (bucketFull)
     {
-        noInterrupts();
+        //noInterrupts();
         bool valid = acurite_crc(buf, sizeof(buf));
-        interrupts();
+        //interrupts();
 
         if (valid)
         {
@@ -235,7 +250,7 @@ void loop()
                 latestTemperature = tc;
             }
 
-            reading = false;
+            bucketFull = false;
         }
     }
 
@@ -245,46 +260,36 @@ void loop()
     {
         lastLcdUpdate = now;
 
-        M5.Lcd.clear();
-
-        // Line 1: wind speed km/h and knots (e.g. "15.9km/h  8.6knt")
-        M5.Lcd.setCursor(0, 0);
+        Home();
 
         if (latestWindspeed >= 0)
         {
-            M5.Lcd.print(latestWindspeed, 1);
-            M5.Lcd.print("km/h ");
-
-            float knots = kphToKnots(latestWindspeed);
-            M5.Lcd.print(knots, 1);
-            M5.Lcd.print("knt");
+            lprintf("%d km/h",latestWindspeed);
+            //float knots = kphToKnots(latestWindspeed);
         }
         else
         {
-            M5.Lcd.print("--.-km/h --.-knt");
+            lprintf("--.-km/h");
         }
 
         // Line 2: wind direction degrees + cardinal + temperature if available
-        M5.Lcd.setCursor(0, 1);
 
         if (latestWindDirection >= 0)
         {
-            M5.Lcd.print((int)latestWindDirection);
-            M5.Lcd.write(223); // degree symbol
-            M5.Lcd.print(" ");
-            M5.Lcd.print(degreesToCompass(latestWindDirection));
+            lprintf("%d %c %s", (int)latestWindDirection, 223, degreesToCompass(latestWindDirection));
         }
         else
         {
-            M5.Lcd.print("No Wind Dir");
+            lprintf("No Wind Dir");
         }
 
-        if (latestTemperature > -100)
+        if (latestTemperature > -100 && latestTemperature < 100)
         {
-            M5.Lcd.print(" T ");
-            M5.Lcd.print((int)latestTemperature);
-            M5.Lcd.write(223);
-            M5.Lcd.print("C");
+            lprintf("Temp:%4d %c C", latestTemperature, 223);
+        }
+        else
+        {
+            lprintf("Temp: ??? %c C", 223);
         }
     }
 }
@@ -293,24 +298,24 @@ void loop()
 // === ISR ===
 void My_ISR()
 {
-    unsigned long timestamp = micros();
+    unsigned long now = micros();
 
     isrCtr++;
 
     if (digitalRead(DI02) == HIGH)
     {
-        if (timestamp - risets > 10000)
+        if (now - risets > 10000)
         {
             state = RESET;
             syncpulses = 0;
             pulsecnt = 0;
         }
 
-        risets = timestamp;
+        risets = now;
         return;
     }
-
-    unsigned long duration = timestamp - risets;
+	
+    unsigned long duration = now - risets;
 
     if (state == RESET || state == INSYNC)
     {
@@ -342,7 +347,8 @@ void My_ISR()
         {
             state = RESET;
             pulsecnt = 0;
-            reading = true;
+            
+            bucketFull = true;
             return;
         }
 
@@ -377,6 +383,66 @@ void My_ISR()
             }                                                                   \
         }
 
+//----------------------------------------------------
+void findFloor(void)
+{
+	uint32_t intCtrMax = 0;
+	uint8_t  squelchMax = 0;
+
+ 	uint8_t  squelchFirst = 0;
+
+ 	uint8_t  squelchLast = 0;
+
+	
+	state = radio.setFrequency(438.0);
+    RADIOLIB_STATE(state, "setFrequency");
+
+	state = radio.setOokThresholdType(RADIOLIB_SX127X_OOK_THRESH_FIXED);
+	RADIOLIB_STATE(state, "setOokThresholdType");
+
+	for (uint8_t squelch = 30; squelch < 0xff; squelch++)
+	{
+		state = radio.setOokFixedOrFloorThreshold(squelch); 
+		
+		Serial.printf("squelch %d " , squelch);
+
+		uint32_t now = millis();
+		isrCtr = 0;
+		
+		while (millis() < now + 1000)
+		{
+		}
+
+		if(isrCtr && squelchFirst == 0) squelchFirst = squelch;
+		if(isrCtr) squelchLast = squelch;
+		
+		if (isrCtr > intCtrMax) 
+		{
+			intCtrMax = isrCtr;
+			squelchMax = squelch;
+		}
+
+		
+		Serial.printf("%6d %d < %d < %d\n", squelch, squelchFirst, squelchMax, squelchLast);
+		//Serial.printf("isrCtr=%d squelchMax=%d\n", isrCtr, squelchMax);
+
+		if (isrCtr == 0 && intCtrMax != 0) break;  //done
+				
+	}
+
+	Serial.printf("\n %d < %d < %d\n", squelchFirst, squelchMax, squelchLast);
+	
+	// back to real channel.
+	state = radio.setFrequency(434.);
+    RADIOLIB_STATE(state, "setFrequency");
+
+	
+    
+	state = radio.setOokFixedOrFloorThreshold(squelchFirst); 
+    RADIOLIB_STATE(state, "setOokFixedOrFloorThreshold");
+}
+//-------------------------------------------------------------
+
 uint8_t OokFixedThreshold = OOK_FIXED_THRESHOLD;
 void RadioSetup()
 {
@@ -398,7 +464,7 @@ void RadioSetup()
      */
 
     int state = radio.beginFSK(434.0,           // freq
-                               1.2,             // bitrate
+                               4.8,             // bitrate
                                20.0,            // fsk dev
                                250.0,           // rxbw khz
                                2.0,             // txpower
@@ -429,7 +495,7 @@ void RadioSetup()
         OokFixedThreshold);     // Default 0x0C RADIOLIB_SX127X_OOK_FIXED_THRESHOLD
     RADIOLIB_STATE(state, "OokFixedThreshold");
 
-    state = radio.setBitRate(1.2);
+    state = radio.setBitRate(4.8);
     RADIOLIB_STATE(state, "setBitRate");
 
     // set function that will be called each time a bit is received
@@ -437,4 +503,5 @@ void RadioSetup()
 
     // start direct mode reception
     radio.receiveDirect();
+
 }

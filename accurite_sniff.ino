@@ -191,7 +191,6 @@ void setup()
     pinMode(DI02, INPUT);
     attachInterrupt(digitalPinToInterrupt(DI02), My_ISR, CHANGE);
 
-
     RadioSetup();
     findFloor();
 
@@ -250,8 +249,7 @@ void loop()
 	{
 		ok = 0;
 		Serial.printf("%d vs %d \n", pulsecnt, isrCtr);
-		report(FG_GREEN "hi stats", bucketHi);
-		report(FG_RED "lo stats", bucketLo);
+		report("STATS");
 	}
 
 	if (soundBeep)
@@ -335,9 +333,9 @@ void loop()
 }
 
 //==============================================================
-void report(char *msg, uint16_t *bucket)
+void report(char *msg)
 {
-	Serial.printf("\n%s -----\n", msg);
+	Serial.printf(FG_YELLOW "\n%s -----\n", msg);
 	for(int i = 1; i < BUCKET_SIZE-1; i++)
 	{
 		//reverse map.
@@ -345,14 +343,25 @@ void report(char *msg, uint16_t *bucket)
 		uint16_t undo = map(i, 1, BUCKET_SIZE-2, LIM_LO, LIM_HI);
 		Serial.printf(" %03d  ", undo);
 	}
-	Serial.println();
+	
+	Serial.println(FG_RED);
 
 	for(int i = 1; i < BUCKET_SIZE-1; i++)
 	{
 		//reverse map.
 		// show values.
-		Serial.printf("%05d ", bucket[i]);
-		if (bucket[i] > 99990) bStopRecording = true;
+		Serial.printf("%05d ", bucketHi[i]);
+		if (bucketHi[i] > 99990) bStopRecording = true;
+	}
+
+	Serial.println(FG_GREEN);
+
+	for(int i = 1; i < BUCKET_SIZE-1; i++)
+	{
+		//reverse map.
+		// show values.
+		Serial.printf("%05d ", bucketLo[i]);
+		if (bucketLo[i] > 99990) bStopRecording = true;
 	}
 	Serial.println(FG_DONE);
 	Serial.println();
@@ -366,22 +375,9 @@ void My_ISR()
 
 	bool pinState = digitalRead(DI02);
     unsigned long duration = now - lastTime;
+	lastTime = now;
     
     isrCtr++;
-
-    if (pinState == HIGH)  // just went hi, so time represents lo time.
-    {
-        if (now - lastTime > 10000)
-        {
-            state = RESET;
-            syncpulses = 0;
-            pulsecnt = 0;
-        }
-
-        lastTime = now;
-        return;
-    }
-	
 
 	//--------------
 	if (!bStopRecording)
@@ -415,6 +411,21 @@ void My_ISR()
 		}
 	}
 	//--------------
+
+
+    if (pinState == HIGH)  // just went hi, so time represents lo time.
+    {
+        if (now - lastTime > 10000)
+        {
+            state = RESET;
+            syncpulses = 0;
+            pulsecnt = 0;
+        }
+
+        return;
+    }
+	
+
 	
 
     if (state == RESET || state == INSYNC)

@@ -245,7 +245,7 @@ void loop()
 #endif
 
 	static uint32_t ok;
-	if (100000 < ok++) 
+	if (pulsecnt) 
 	{
 		ok = 0;
 		Serial.printf("%d vs %d \n", pulsecnt, isrCtr);
@@ -338,31 +338,59 @@ void report(char *msg)
 	Serial.printf(FG_YELLOW "\n%s -----\n", msg);
 	for(int i = 1; i < BUCKET_SIZE-1; i++)
 	{
-		//reverse map.
-		// show values of buckets.
-		uint16_t undo = map(i, 1, BUCKET_SIZE-2, LIM_LO, LIM_HI);
+		//reverse map to show bucket windows.
+ 		uint16_t undo = map(i, 1, BUCKET_SIZE-2, LIM_LO, LIM_HI);
 		Serial.printf(" %03d  ", undo);
 	}
 	
 	Serial.println(FG_RED);
 
+	uint32_t avg = 0;
+
 	for(int i = 1; i < BUCKET_SIZE-1; i++)
 	{
-		//reverse map.
-		// show values.
-		Serial.printf("%05d ", bucketHi[i]);
+ 		avg += bucketHi[i];
+		if (bucketHi[i] > 99990) bStopRecording = true;
+	}
+	avg /= (BUCKET_SIZE-2);
+	
+	for(int i = 1; i < BUCKET_SIZE-1; i++)
+	{
+		if (bucketHi[i] > avg /3)
+		{
+	 		Serial.printf("%05d ", bucketHi[i]);
+	 	}
+		else
+		{
+	 		Serial.print("      ");
+		}
 		if (bucketHi[i] > 99990) bStopRecording = true;
 	}
 
 	Serial.println(FG_GREEN);
-
+	avg = 0;
+	
 	for(int i = 1; i < BUCKET_SIZE-1; i++)
 	{
-		//reverse map.
-		// show values.
-		Serial.printf("%05d ", bucketLo[i]);
+ 		avg += bucketLo[i];
 		if (bucketLo[i] > 99990) bStopRecording = true;
 	}
+	avg /= (BUCKET_SIZE-2);
+	
+	for(int i = 1; i < BUCKET_SIZE-1; i++)
+	{
+		if (bucketLo[i] > avg /3)
+		{
+	 		Serial.printf("%05d ", bucketLo[i]);
+	 	}
+		else
+		{
+	 		Serial.print("      ");
+		}
+		if (bucketLo[i] > 99990) bStopRecording = true;
+	}
+
+
 	Serial.println(FG_DONE);
 	Serial.println();
 }

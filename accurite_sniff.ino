@@ -13,6 +13,8 @@ void RadioSetup();
 // include the library
 #include <RadioLib.h>
 
+uint16_t bNeedBeep = 0;
+
 // SX1276 has the following connections:
 #define NSS     27
 #define DIO0    -1
@@ -221,6 +223,12 @@ void loop()
 		ok = 0;
 		Serial.printf("%d vs %d \n", pulsecnt, isrCtr);
 	}
+
+	if (bNeedBeep)
+	{
+		bNeedBeep = 0;
+		M5.Speaker.tone(bNeedBeep, 100);
+	}
 	
     if (bucketFull)
     {
@@ -414,7 +422,11 @@ void findFloor(void)
 		}
 
 		if(isrCtr && squelchFirst == 0) squelchFirst = squelch;
-		if(isrCtr) squelchLast = squelch;
+		if(isrCtr) 
+		{
+			squelchLast = squelch;
+			M5.Speaker.tone(1000, 100);
+		}
 		
 		if (isrCtr > intCtrMax) 
 		{
@@ -430,6 +442,7 @@ void findFloor(void)
 				
 	}
 
+	squelchLast++;
 	Serial.printf("\n %d < %d < %d\n", squelchFirst, squelchMax, squelchLast);
 	
 	// back to real channel.
@@ -438,7 +451,7 @@ void findFloor(void)
 
 	
     
-	state = radio.setOokFixedOrFloorThreshold(squelchFirst); 
+	state = radio.setOokFixedOrFloorThreshold(squelchLast); 
     RADIOLIB_STATE(state, "setOokFixedOrFloorThreshold");
 }
 //-------------------------------------------------------------

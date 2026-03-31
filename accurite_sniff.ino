@@ -18,7 +18,7 @@
 #define FG_WHITE      "\033[0;37m" 
 
 //------------------------------------------------------------------
-void RadioSetup();
+void RadioSetupRx();
 // include the library
 #include <RadioLib.h>
 
@@ -45,6 +45,18 @@ bool bStopRecording = false;
 
 #define LIM_LO 100
 #define LIM_HI 900
+
+#define iRUNNING_FREQ 433900000
+
+#define RUNNING_FREQ ((float)(iRUNNING_FREQ)/1000000.)
+
+// Allowed values are 7.8, 10.4, 15.6, 20.8, 31.25, 41.7, 62.5, 125, 250 and 500 kHz
+#define RUNNING_BW  15.6 //31.25 //250. //10.4
+
+#define CAL_FREQUENCY (RUNNING_FREQ-.5)
+float currentFreq = RUNNING_FREQ;
+
+
 
 
 #define EEMEM
@@ -92,6 +104,20 @@ float latestTemperature = -1000;    // sentinel invalid temp (C)
 unsigned long lastLcdUpdate = 0;
 const unsigned long lcdUpdateInterval = 1000; // ms
 // === Helper Functions ===
+
+#define OOK_FIXED_THRESHOLD 15
+#define RADIOLIB_STATE(STATEVAR, FUNCTION)                              \
+        {                                                                     \
+            if ((STATEVAR) == RADIOLIB_ERR_NONE) {                              \
+                Serial.printf(" " FUNCTION " - success!\n");     \
+            } else {                                                            \
+                Serial.printf(" " FUNCTION " failed, code: %d\n", \
+                              STATEVAR);                                            \
+                delay(3000); \
+                assert(STATEVAR == 0); \
+            }                                                                   \
+        }
+
 String degreesToCompass(float degrees)
 {
     // 8 point compass
@@ -158,6 +184,84 @@ void My_ISR();
 
 volatile uint32_t isrCtr = 0;
 
+//---------------------------------------------------------------------
+void beacon(void)
+{
+
+	// power off for reset
+	M5.Power.setExtPower(false); // TIP
+	delay(1000);
+	M5.Power.setExtPower(true);  // TIP
+
+	//radio.setTxPower(2);
+
+	// the following settings can also
+	// be modified at run-time
+	
+	state = radio.setFrequency(433.911 - .002300);	 // freq for wx?
+	state = radio.setBitRate(.5);
+
+	state = radio.setFrequencyDeviation(10.0);
+	state = radio.setRxBandwidth(8.0);
+	state = radio.setOutputPower(2.0);	  //lowest pwr.
+	state = radio.setCurrentLimit(100);
+
+	state = radio.setDataShaping(RADIOLIB_SHAPING_0_5);
+	uint8_t syncWord[] = {0x01, 0x23, 0x45, 0x67,
+						  0x89, 0xAB, 0xCD, 0xEF};
+
+	state = radio.setSyncWord(syncWord, 8);
+	if (state != RADIOLIB_ERR_NONE) {
+	  Serial.print(F("Unable to set configuration, code "));
+	  Serial.println(state);
+	  while (true) { delay(10); }
+	}
+
+	// FSK modulation can be changed to OOK
+	// NOTE: When using OOK, the maximum bit rate is only 32.768 kbps!
+	//		 Also, data shaping changes from Gaussian filter to
+	//		 simple filter with cutoff frequency. Make sure to call
+	//		 setDataShapingOOK() to set the correct shaping!
+
+	state = radio.setOOK(true);
+	state = radio.setDataShapingOOK(2);  // no shaping 
+	if (state != RADIOLIB_ERR_NONE) 
+	{
+	  Serial.print(F("Unable to change modulation, code "));
+	  Serial.println(state);
+	  while (true) { delay(10); }
+	}
+
+	// ------------------------------------------------
+
+	/*
+	  byte byteArr[] = {0x01, 0x23, 0x45, 0x67,
+						0x89, 0xAB, 0xCD, 0xEF};
+	  int state = radio.transmit(byteArr, 8);
+	*/
+
+	const char *test = "01234567890123456789012345678901234567890123456789";  
+
+	for (int i = 0; i < 5; i++)
+	{
+		// transmit OOK packet
+		//state = radio.transmit("Hello World!");
+		state = radio.transmit( test, 0);
+		if (state == RADIOLIB_ERR_NONE) 
+		{
+		  Serial.printf("[SX1278] Packet %d transmitted successfully!\n", i);
+		} else if (state == RADIOLIB_ERR_PACKET_TOO_LONG) {
+		  Serial.println(F("[SX1278] Packet too long!"));
+		} else if (state == RADIOLIB_ERR_TX_TIMEOUT) {
+		  Serial.println(F("[SX1278] Timed out while transmitting!"));
+		} else {
+		  Serial.println(F("[SX1278] Failed to transmit packet, code "));
+		  Serial.println(state);
+		}
+		delay(500);
+	}
+}
+//---------------------------------------------------------------------
 // === Setup ===
 void setup()
 {
@@ -188,10 +292,40 @@ void setup()
     delay(1500);
     M5.Lcd.clear();
 
-    pinMode(DI02, INPUT);
-    attachInterrupt(digitalPinToInterrupt(DI02), My_ISR, CHANGE);
+    /*!
+     *    \brief FSK modem initialization method. Must be called at least once from Arduino sketch to initialize the module.
+     *    \param freq Carrier frequency in MHz. Allowed values range from 137.0 MHz to 1020.0 MHz.
+     *    \param br Bit rate of the FSK transmission in kbps (kilobits per second). Allowed values range from 1.2 to 300.0 kbps.
+     *    \param freqDev Frequency deviation of the FSK transmission in kHz. Allowed values range from 0.6 to 200.0 kHz.
+     *    Note that the allowed range changes based on bit rate setting, so that the condition FreqDev + BitRate/2 <= 250 kHz is always met.
+     *    \param rxBw Receiver bandwidth in kHz. Allowed values are 2.6, 3.1, 3.9, 5.2, 6.3, 7.8, 10.4, 12.5, 15.6, 20.8, 25, 31.3, 41.7, 50, 62.5, 83.3, 100, 125, 166.7, 200 and 250 kHz.
+     *    \param power Transmission output power in dBm. Allowed values range from 2 to 17 dBm.
+     *    \param preambleLength Length of FSK preamble in bits.
+     *    \param enableOOK Use OOK modulation instead of FSK.
+     *    \returns \ref status_codes
+     */
 
-    RadioSetup();
+	// power off for reset
+	M5.Power.setExtPower(false); // TIP
+	delay(1000);
+	M5.Power.setExtPower(true);  // TIP
+	
+
+    int state = radio.beginFSK(434.0,           // freq
+                               .5,             // bitrate
+                               0.0,            // fsk dev
+                               RUNNING_BW,     // rxbw khz
+                               2.0,             // txpower
+                               8,               // fsk preamble bits.
+                               true             // enable ook
+                               );
+
+    RADIOLIB_STATE(state, "beginFSK");
+
+
+	///RadioSetupTx();
+
+    RadioSetupRx();
     findFloor();
 
     uint8_t pin;
@@ -244,30 +378,30 @@ void loop()
     }
 #endif
 
-	static uint32_t ok;
-	if (pulsecnt) 
+	static uint32_t lastPC;
+	if (pulsecnt == 0 && lastPC != 0) 
 	{
-		ok = 0;
-		Serial.printf("%d vs %d \n", pulsecnt, isrCtr);
+		Serial.printf("%d vs %d \n", pulsecnt, lastPC);
 		report("STATS");
 	}
+	lastPC = pulsecnt;
+	
 
 	if (soundBeep)
 	{
-		soundBeep = 0;
 		M5.Speaker.tone(soundBeep, 100);
+		soundBeep = 0;
 	}
 	
     if (bucketFull)
     {
-        //noInterrupts();
+		detachInterrupt(digitalPinToInterrupt(DI02));
         bool valid = acurite_crc(buf, sizeof(buf));
-        //interrupts();
+		M5.Speaker.tone(1400, 100);
 
         if (valid)
         {
-
-        	soundBeep = 500;
+			
             int msgtype = (buf[2] & 0x3F);
 
             // Decode wind speed
@@ -287,9 +421,17 @@ void loop()
                 float tc = (tf - 32) / 1.8; // convert F to C
                 latestTemperature = tc;
             }
+            else 
+            {
+            	Serial.printf("unknown msgtype = 0x%X\n", msgtype);
+            }
 
-            bucketFull = false;
         }
+        
+		bucketFull = false;
+		state == RESET;
+		
+		attachInterrupt(digitalPinToInterrupt(DI02), My_ISR, CHANGE);
     }
 
     unsigned long now = millis();
@@ -390,6 +532,29 @@ void report(char *msg)
 		if (bucketLo[i] > 99990) bStopRecording = true;
 	}
 
+	Serial.println(FG_CYAN);
+
+	avg = 0;
+
+	for(int i = 1; i < BUCKET_SIZE-1; i++)
+	{
+ 		avg += bucketHi[i];
+ 		avg += bucketLo[i];
+	}
+	avg /= (BUCKET_SIZE-2) * 2;
+	
+	for(int i = 1; i < BUCKET_SIZE-1; i++)
+	{
+		if ((bucketHi[i] + bucketLo[i]) > avg /3)
+		{
+	 		Serial.printf("%05d ", bucketHi[i]+bucketLo[i]);
+	 	}
+		else
+		{
+	 		Serial.print("      ");
+		}
+	}
+
 
 	Serial.println(FG_DONE);
 	Serial.println();
@@ -420,6 +585,10 @@ void My_ISR()
 			}
 			else
 			{
+				#ifdef TESTING
+					// test!!! bucket force every low to the 800 bucket
+					idx = map(800, LIM_LO, LIM_HI, 1, BUCKET_SIZE-2);
+				#endif
 				bucketLo[idx]++;
 			}
 		}
@@ -441,16 +610,16 @@ void My_ISR()
 	//--------------
 
 
-    if (pinState == HIGH)  // just went hi, so time represents lo time.
+    //if (pinState == HIGH)  // just went hi, so time represents lo time.
     {
-        if (now - lastTime > 10000)
+        if (now - lastTime > 1500)
         {
             state = RESET;
             syncpulses = 0;
             pulsecnt = 0;
+			return;
         }
 
-        return;
     }
 	
 
@@ -458,6 +627,7 @@ void My_ISR()
 
     if (state == RESET || state == INSYNC)
     {
+		
         if (duration > 575 && duration < 675)
         {
             state = INSYNC;
@@ -508,21 +678,15 @@ void My_ISR()
 }
 
 
-//----------------------------------------------------
-#define OOK_FIXED_THRESHOLD 15
-#define RADIOLIB_STATE(STATEVAR, FUNCTION)                              \
-        {                                                                     \
-            if ((STATEVAR) == RADIOLIB_ERR_NONE) {                              \
-                Serial.printf(" " FUNCTION " - success!\n");     \
-            } else {                                                            \
-                Serial.printf(" " FUNCTION " failed, code: %d\n", \
-                              STATEVAR);                                            \
-                while (true)                                                      \
-                ;                                                               \
-            }                                                                   \
-        }
 
 //----------------------------------------------------
+/*
+	bw	setting
+	250	42
+	31	23
+	15	17
+	7	12
+*/
 void findFloor(void)
 {
 	uint32_t intCtrMax = 0;
@@ -532,23 +696,25 @@ void findFloor(void)
 
  	uint8_t  squelchLast = 0;
 
+	currentFreq = CAL_FREQUENCY;
 	
-	state = radio.setFrequency(438.0);
+	state = radio.setFrequency(currentFreq);
     RADIOLIB_STATE(state, "setFrequency");
 
 	state = radio.setOokThresholdType(RADIOLIB_SX127X_OOK_THRESH_FIXED);
 	RADIOLIB_STATE(state, "setOokThresholdType");
 
-	for (uint8_t squelch = 30; squelch < 0xff; squelch++)
+	uint16_t squelch;
+	for (squelch = 1; squelch < 0xff; squelch++)
 	{
 		state = radio.setOokFixedOrFloorThreshold(squelch); 
 		
-		Serial.printf("squelch %d " , squelch);
+		Serial.printf("F=%f mHz BW=%.1f squelch %d " , currentFreq, RUNNING_BW * 1000., squelch);
 
 		uint32_t now = millis();
 		isrCtr = 0;
 		
-		while (millis() < now + 1000)
+		while (millis() < now + 2000)
 		{
 		}
 
@@ -573,57 +739,37 @@ void findFloor(void)
 				
 	}
 
+	assert(squelch != 0xFF);  // couldn't find value. bail
+	
 	squelchLast++;
 	Serial.printf("\n %d < %d < %d\n", squelchFirst, squelchMax, squelchLast);
 	
 	// back to real channel.
-	state = radio.setFrequency(434.);
+	currentFreq = RUNNING_FREQ;
+
+	state = radio.setFrequency(currentFreq);
     RADIOLIB_STATE(state, "setFrequency");
+
+	state = radio.setOokFixedOrFloorThreshold(squelchLast + 1); 
+    RADIOLIB_STATE(state, "setOokFixedOrFloorThreshold");
+
+	// floor is set for PEAK to gently fall onto 
+	// set mode to go from fixed (find floor) to PEAK mode
+	state = radio.setOokThresholdType(RADIOLIB_SX127X_OOK_THRESH_PEAK);
+	RADIOLIB_STATE(state, "setOokThresholdType");
 
 	
     
-	state = radio.setOokFixedOrFloorThreshold(squelchLast); 
-    RADIOLIB_STATE(state, "setOokFixedOrFloorThreshold");
 }
 //-------------------------------------------------------------
 
 uint8_t OokFixedThreshold = OOK_FIXED_THRESHOLD;
-void RadioSetup()
+void RadioSetupRx()
 {
-	// power off for reset
-	M5.Power.setExtPower(false); // TIP
-	delay(1000);
-	M5.Power.setExtPower(true);  // TIP
-	
+	pinMode(DI02, INPUT);
 
-    // initialize SX1278 with FSK modem at 9600 bps
-    Serial.print(F("[SX1278] Initializing ... "));
-
-    /*!
-     *    \brief FSK modem initialization method. Must be called at least once from Arduino sketch to initialize the module.
-     *    \param freq Carrier frequency in MHz. Allowed values range from 137.0 MHz to 1020.0 MHz.
-     *    \param br Bit rate of the FSK transmission in kbps (kilobits per second). Allowed values range from 1.2 to 300.0 kbps.
-     *    \param freqDev Frequency deviation of the FSK transmission in kHz. Allowed values range from 0.6 to 200.0 kHz.
-     *    Note that the allowed range changes based on bit rate setting, so that the condition FreqDev + BitRate/2 <= 250 kHz is always met.
-     *    \param rxBw Receiver bandwidth in kHz. Allowed values are 2.6, 3.1, 3.9, 5.2, 6.3, 7.8, 10.4, 12.5, 15.6, 20.8, 25, 31.3, 41.7, 50, 62.5, 83.3, 100, 125, 166.7, 200 and 250 kHz.
-     *    \param power Transmission output power in dBm. Allowed values range from 2 to 17 dBm.
-     *    \param preambleLength Length of FSK preamble in bits.
-     *    \param enableOOK Use OOK modulation instead of FSK.
-     *    \returns \ref status_codes
-     */
-
-    int state = radio.beginFSK(434.0,           // freq
-                               4.8,             // bitrate
-                               20.0,            // fsk dev
-                               250.0,           // rxbw khz
-                               2.0,             // txpower
-                               8,               // fsk preamble bits.
-                               true             // enable ook
-                               );
-
-    RADIOLIB_STATE(state, "beginFSK");
-
-    delay(3000);
+    state = radio.setOOK(true);
+    RADIOLIB_STATE(state, "setOOK");
 
     state = radio.setDataShapingOOK(2);     // Default 0 ( 0, 1, 2 )
     RADIOLIB_STATE(state, "setDataShapingOOK");
@@ -644,16 +790,57 @@ void RadioSetup()
         OokFixedThreshold);     // Default 0x0C RADIOLIB_SX127X_OOK_FIXED_THRESHOLD
     RADIOLIB_STATE(state, "OokFixedThreshold");
 
-    state = radio.setBitRate(4.8);
+    state = radio.setBitRate(.5);
     RADIOLIB_STATE(state, "setBitRate");
 
-	state = radio.setGain(0); //0=autogain 1=max 5=low
+	state = radio.setGain(3); //0=autogain 1=max 6=low
     RADIOLIB_STATE(state, "setGain(max)");
 	
     // set function that will be called each time a bit is received
     radio.setDirectAction(My_ISR);
 
+	//state = radio.setBandwidth(RUNNING_BW);  // lora only :(
+    ////RADIOLIB_STATE(state, "running bw" );
+	
     // start direct mode reception
-    radio.receiveDirect();
+    state = radio.receiveDirect();
+    RADIOLIB_STATE(state, "receiveDirect");
+
+	attachInterrupt(digitalPinToInterrupt(DI02), My_ISR, CHANGE);
+
 
 }
+
+void RadioSetupTx()
+{
+	// power off for reset
+	M5.Power.setExtPower(false); // TIP
+	delay(1000);
+	M5.Power.setExtPower(true);  // TIP
+	
+
+    // initialize SX1278 with FSK modem at 9600 bps
+    Serial.print(F("[SX1278] Initializing for TX ... "));
+
+	//radio.setTxPower(2);
+
+	Serial.println("tx ON");
+
+	//4.2.4. Operating Modes in FSK/OOK Mode
+    state = radio.setMode(3);
+    RADIOLIB_STATE(state, "setMode");
+
+    // start direct mode reception
+	state =radio.transmitDirect(iRUNNING_FREQ);
+    RADIOLIB_STATE(state, "transmitDirect");
+	
+	//detachInterrupt(digitalPinToInterrupt(DI02));
+
+	delay(1000);
+	Serial.println("tx OFF");
+	
+	pinMode(DI02, OUTPUT);
+	digitalWrite(DI02, 0);
+
+}
+

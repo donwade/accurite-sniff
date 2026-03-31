@@ -46,8 +46,7 @@ bool bStopRecording = false;
 #define LIM_LO 100
 #define LIM_HI 900
 
-#define iRUNNING_FREQ 433900000
-
+#define iRUNNING_FREQ (433910000 - 2300 + 1400)
 #define RUNNING_FREQ ((float)(iRUNNING_FREQ)/1000000.)
 
 // Allowed values are 7.8, 10.4, 15.6, 20.8, 31.25, 41.7, 62.5, 125, 250 and 500 kHz
@@ -187,25 +186,29 @@ volatile uint32_t isrCtr = 0;
 //---------------------------------------------------------------------
 void beacon(void)
 {
-
-	// power off for reset
-	M5.Power.setExtPower(false); // TIP
-	delay(1000);
-	M5.Power.setExtPower(true);  // TIP
-
-	//radio.setTxPower(2);
-
 	// the following settings can also
 	// be modified at run-time
+	currentFreq = RUNNING_FREQ;
 	
-	state = radio.setFrequency(433.911 - .002300);	 // freq for wx?
+	state = radio.setFrequency(currentFreq);	 // freq for wx?
+    RADIOLIB_STATE(state, "setDataShapingOOK");
+    
 	state = radio.setBitRate(.5);
+    RADIOLIB_STATE(state, "setBitRate");
 
-	state = radio.setFrequencyDeviation(10.0);
+	state = radio.setFrequencyDeviation(.21);
+	RADIOLIB_STATE(state, "setFrequencyDeviation");
+
 	state = radio.setRxBandwidth(8.0);
-	state = radio.setOutputPower(2.0);	  //lowest pwr.
-	state = radio.setCurrentLimit(100);
+    RADIOLIB_STATE(state, "setRxBandwidth");
 
+	state = radio.setOutputPower(2.0);	  //lowest pwr.
+    RADIOLIB_STATE(state, "setOutputPower");
+
+	state = radio.setCurrentLimit(100);
+    RADIOLIB_STATE(state, "setCurrentLimit");
+
+/*
 	state = radio.setDataShaping(RADIOLIB_SHAPING_0_5);
 	uint8_t syncWord[] = {0x01, 0x23, 0x45, 0x67,
 						  0x89, 0xAB, 0xCD, 0xEF};
@@ -216,6 +219,7 @@ void beacon(void)
 	  Serial.println(state);
 	  while (true) { delay(10); }
 	}
+*/
 
 	// FSK modulation can be changed to OOK
 	// NOTE: When using OOK, the maximum bit rate is only 32.768 kbps!
@@ -224,13 +228,10 @@ void beacon(void)
 	//		 setDataShapingOOK() to set the correct shaping!
 
 	state = radio.setOOK(true);
+    RADIOLIB_STATE(state, "setOOK");
+    
 	state = radio.setDataShapingOOK(2);  // no shaping 
-	if (state != RADIOLIB_ERR_NONE) 
-	{
-	  Serial.print(F("Unable to change modulation, code "));
-	  Serial.println(state);
-	  while (true) { delay(10); }
-	}
+    RADIOLIB_STATE(state, "setDataShapingOOK");
 
 	// ------------------------------------------------
 
@@ -242,7 +243,7 @@ void beacon(void)
 
 	const char *test = "01234567890123456789012345678901234567890123456789";  
 
-	for (int i = 0; i < 5; i++)
+	for (int i = 0; i < 3; i++)
 	{
 		// transmit OOK packet
 		//state = radio.transmit("Hello World!");
@@ -258,7 +259,7 @@ void beacon(void)
 		  Serial.println(F("[SX1278] Failed to transmit packet, code "));
 		  Serial.println(state);
 		}
-		delay(500);
+		delay(200);
 	}
 }
 //---------------------------------------------------------------------
@@ -324,14 +325,16 @@ void setup()
 
 
 	///RadioSetupTx();
-
+	beacon();
+	
     RadioSetupRx();
     findFloor();
 
     uint8_t pin;
     uint8_t cnt = 100;
     uint32_t now = millis();
-    Serial.println("waiting for DIO2 to move");
+    
+    Serial.printf("waiting for DIO2 to move on %f mHz\n", currentFreq);
 
     while (cnt)
     {

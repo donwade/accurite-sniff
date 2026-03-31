@@ -1,2 +1,3 @@
-m5-stackS2   -DRADIOLIB_GODMODE=1
+m5-stackS2   -DRADIOLIB_GODMODE=1 --log-warnings
+
 

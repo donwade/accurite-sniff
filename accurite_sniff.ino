@@ -333,7 +333,9 @@ void setup()
 
 	///RadioSetupTx();
 	//beacon();      //do not transmit into the rtl+antenna
+
 	
+    report("ok");
     RadioSetupRx();
     findFloor();
 
@@ -492,91 +494,104 @@ void report(char *msg)
 {
 	int k;
 	Serial.printf(FG_YELLOW "\n%s ----- %d \n", msg, isrCtr);
+	Serial.printf("  %4d  ", 0);
 	for(int i = 0; i < BUCKET_SIZE; i++)
 	{
 		//reverse map to show bucket windows.
  		uint16_t undo = map(i, 1, BUCKET_SIZE-2, LIM_LO, LIM_HI);
-		Serial.printf(" %03d  ", undo);
+		Serial.printf(" %4d  ", undo+1);
+	}
+	Serial.println();
+	for(int i = 0; i < BUCKET_SIZE; i++)
+	{
+		//reverse map to show bucket windows.
+ 		uint16_t undo = map(i, 1, BUCKET_SIZE-2, LIM_LO, LIM_HI);
+		Serial.printf(" -%4d ", undo);
 	}
 	
 	Serial.println(FG_RED);
 
-	uint32_t avg = 0;
+	uint32_t avg1 = 0;
+	uint32_t avg2 = 0;
+	uint32_t avg3 = 0;
+
+	uint64_t std1 = 0;
+	uint64_t std2 = 0;
+	uint64_t std3 = 0;
+		
 	k = 0;
 
 	// end buckets don't get averaged
+
+	// avg ---- bucketHi ----------------
 	for(int i = 1; i < BUCKET_SIZE-2; i++)
 	{
 		k++;
- 		avg += bucketHi[i];
-		if (bucketHi[i] > 99990) bStopRecording = true;
+ 		avg1 += bucketHi[i];
+		if (bucketHi[i] > 64000) bStopRecording = true;
 	}
-	avg /= k;
+	avg1 /= k;
+
+	// stdev
+	for(int i = 1; i < BUCKET_SIZE-2; i++)
+	{
+ 		std1 += (avg1 - bucketHi[i]) * (avg1 - bucketHi[i]); 
+	}
+	
+	std1 = sqrt(std1/k);
+	std1 /= 2;  // make window 
+	//Serial.printf("avg = %d +/- std = %d\n", avg1, std1/2);
 	
 	for(int i = 0; i < BUCKET_SIZE; i++)
 	{
-		if ( bucketHi[i] > avg /3 || !i)
+		if ( bucketHi[i] > (avg1 - std1) && bucketHi[i] < (avg1 + std1) )
 		{
-	 		Serial.printf("%05d ", bucketHi[i]);
+	 		Serial.printf(" %05d ", bucketHi[i]);
 	 	}
 		else
 		{
-	 		Serial.print("      ");
-		}
-		if (bucketHi[i] > 99990) bStopRecording = true;
+	 		Serial.print("       ");
+ 		}
+		if (bucketHi[i] > 64000) bStopRecording = true;
 	}
 
+	
 	Serial.println(FG_GREEN);
-	avg = 0;
 	k = 0;
-	
 	// end buckets don't get averaged
+
+	// avg ---- bucketLo ----------------
 	for(int i = 1; i < BUCKET_SIZE-2; i++)
 	{
 		k++;
- 		avg += bucketLo[i];
-		if (bucketLo[i] > 99990) bStopRecording = true;
+ 		avg2 += bucketLo[i];
+		if (bucketLo[i] > 64000) bStopRecording = true;
 	}
-	avg /= k;
-	
-	for(int i = 0; i < BUCKET_SIZE; i++)
-	{
-		if (bucketLo[i] > avg /3 || !i)
-		{
-	 		Serial.printf("%05d ", bucketLo[i]);
-	 	}
-		else
-		{
-	 		Serial.print("      ");
-		}
-		if (bucketLo[i] > 99990) bStopRecording = true;
-	}
+	avg2 /= k;
 
-	Serial.println(FG_CYAN);
-
-	avg = 0;
-	k = 0;
-	
+	// stdev
 	for(int i = 1; i < BUCKET_SIZE-2; i++)
 	{
-		k++;
- 		avg += bucketHi[i];
- 		avg += bucketLo[i];
+ 		std2 += (avg2 - bucketLo[i]) * (avg2 - bucketLo[i]); 
 	}
-	avg /= k * 2;
+
+	std2 = sqrt(std2/k);
+	std2 /= 2;  // make window 
+	//Serial.printf("avg = %d +/- std = %d\n", avg2, std2/2);
+	
 	
 	for(int i = 0; i < BUCKET_SIZE; i++)
 	{
-		if ((bucketHi[i] + bucketLo[i]) > avg /3  || !i)
+		if ( bucketLo[i] > (avg2 - std2) && bucketLo[i] < (avg2 + std2) )
 		{
-	 		Serial.printf("%05d ", bucketHi[i]+bucketLo[i]);
+	 		Serial.printf(" %05d ", bucketLo[i]);
 	 	}
 		else
 		{
-	 		Serial.print("      ");
-		}
+	 		Serial.print("       ");
+ 		}
+		if (bucketLo[i] > 64000) bStopRecording = true;
 	}
-
 
 	Serial.println(FG_DONE);
 	Serial.println();

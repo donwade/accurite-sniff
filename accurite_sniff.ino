@@ -410,10 +410,10 @@ void loop()
     {
 		detachInterrupt(digitalPinToInterrupt(DI02));
         bool valid = acurite_crc(buf, sizeof(buf));
-		M5.Speaker.tone(1400, 100);
 
         if (valid)
         {
+			M5.Speaker.tone(1400, 100);
 			
             int msgtype = (buf[2] & 0x3F);
 
@@ -515,7 +515,7 @@ void report(char *msg)
 	
 	for(int i = 0; i < BUCKET_SIZE; i++)
 	{
-		if (1 || bucketHi[i] > avg /3 || !i)
+		if ( bucketHi[i] > avg /3 || !i)
 		{
 	 		Serial.printf("%05d ", bucketHi[i]);
 	 	}
@@ -541,8 +541,7 @@ void report(char *msg)
 	
 	for(int i = 0; i < BUCKET_SIZE; i++)
 	{
-		//if (bucketLo[i] > avg /3 || !i)
-		if (1 || bucketLo[i] || !i)
+		if (bucketLo[i] > avg /3 || !i)
 		{
 	 		Serial.printf("%05d ", bucketLo[i]);
 	 	}
@@ -568,7 +567,7 @@ void report(char *msg)
 	
 	for(int i = 0; i < BUCKET_SIZE; i++)
 	{
-		if (1 || (bucketHi[i] + bucketLo[i]) > avg /3  || !i)
+		if ((bucketHi[i] + bucketLo[i]) > avg /3  || !i)
 		{
 	 		Serial.printf("%05d ", bucketHi[i]+bucketLo[i]);
 	 	}
@@ -782,8 +781,8 @@ void findFloor(void)
 	state = radio.setFrequency(currentFreq);
     RADIOLIB_STATE(state, "setFrequency");
 
-	calculatedFloor = squelchMiddle;
-	Serial.printf("taking %d as squelch setting \n", calculatedFloor);
+	calculatedFloor = squelchLast;
+	Serial.printf(FG_RED"\ntaking %d as squelch setting \n"FG_DONE, calculatedFloor);
 
 	state = radio.setOokFixedOrFloorThreshold(squelchMiddle); 
 	//state = radio.setOokFixedOrFloorThreshold(squelchMiddle); 

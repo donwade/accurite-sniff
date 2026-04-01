@@ -39,8 +39,8 @@ SX1276 radio = new Module(NSS,      /*NSS*/
 const int DI02 = 25;
 //------------------------------------------------------------------
 #define BUCKET_SIZE 20
-uint16_t bucketHi[BUCKET_SIZE];
-uint16_t bucketLo[BUCKET_SIZE];
+volatile uint16_t bucketHi[BUCKET_SIZE];
+volatile uint16_t bucketLo[BUCKET_SIZE];
 bool bStopRecording = false;
 
 #define LIM_LO 100
@@ -52,7 +52,7 @@ bool bStopRecording = false;
 // Allowed values are 7.8, 10.4, 15.6, 20.8, 31.25, 41.7, 62.5, 125, 250 and 500 kHz
 #define RUNNING_BW  15.6 //31.25 //250. //10.4
 
-#define CAL_FREQUENCY (RUNNING_FREQ-.5)
+#define CAL_FREQUENCY (RUNNING_FREQ- .008000)
 float currentFreq = RUNNING_FREQ;
 
 
@@ -325,11 +325,12 @@ void setup()
 
 
 	///RadioSetupTx();
-	beacon();
+	// beacon();      do not transmit into the rtl+antenna
 	
     RadioSetupRx();
     findFloor();
 
+/*
     uint8_t pin;
     uint8_t cnt = 100;
     uint32_t now = millis();
@@ -343,7 +344,9 @@ void setup()
         cnt--;
     }
     Serial.printf("pass: DI02 %d samples in %d ms\n", isrCtr, millis() - now);  
-
+*/
+    Serial.println("**** end of setup ****\n");
+    
 }
 
 
@@ -382,12 +385,12 @@ void loop()
 #endif
 
 	static uint32_t lastPC;
-	if (pulsecnt == 0 && lastPC != 0) 
+	if (millis() >= lastPC) 
 	{
-		Serial.printf("%d vs %d \n", pulsecnt, lastPC);
+		//Serial.printf("%d vs %d \n", pulsecnt, lastPC);
 		report("STATS");
+		lastPC = millis() + 5000;
 	}
-	lastPC = pulsecnt;
 	
 
 	if (soundBeep)
@@ -480,8 +483,9 @@ void loop()
 //==============================================================
 void report(char *msg)
 {
-	Serial.printf(FG_YELLOW "\n%s -----\n", msg);
-	for(int i = 1; i < BUCKET_SIZE-1; i++)
+	int k;
+	Serial.printf(FG_YELLOW "\n%s ----- %d \n", msg, isrCtr);
+	for(int i = 0; i < BUCKET_SIZE; i++)
 	{
 		//reverse map to show bucket windows.
  		uint16_t undo = map(i, 1, BUCKET_SIZE-2, LIM_LO, LIM_HI);
@@ -491,17 +495,20 @@ void report(char *msg)
 	Serial.println(FG_RED);
 
 	uint32_t avg = 0;
+	k = 0;
 
-	for(int i = 1; i < BUCKET_SIZE-1; i++)
+	// end buckets don't get averaged
+	for(int i = 1; i < BUCKET_SIZE-2; i++)
 	{
+		k++;
  		avg += bucketHi[i];
 		if (bucketHi[i] > 99990) bStopRecording = true;
 	}
-	avg /= (BUCKET_SIZE-2);
+	avg /= k;
 	
-	for(int i = 1; i < BUCKET_SIZE-1; i++)
+	for(int i = 0; i < BUCKET_SIZE; i++)
 	{
-		if (bucketHi[i] > avg /3)
+		if (1 || bucketHi[i] > avg /3 || !i)
 		{
 	 		Serial.printf("%05d ", bucketHi[i]);
 	 	}
@@ -514,17 +521,21 @@ void report(char *msg)
 
 	Serial.println(FG_GREEN);
 	avg = 0;
+	k = 0;
 	
-	for(int i = 1; i < BUCKET_SIZE-1; i++)
+	// end buckets don't get averaged
+	for(int i = 1; i < BUCKET_SIZE-2; i++)
 	{
+		k++;
  		avg += bucketLo[i];
 		if (bucketLo[i] > 99990) bStopRecording = true;
 	}
-	avg /= (BUCKET_SIZE-2);
+	avg /= k;
 	
-	for(int i = 1; i < BUCKET_SIZE-1; i++)
+	for(int i = 0; i < BUCKET_SIZE; i++)
 	{
-		if (bucketLo[i] > avg /3)
+		//if (bucketLo[i] > avg /3 || !i)
+		if (1 || bucketLo[i] || !i)
 		{
 	 		Serial.printf("%05d ", bucketLo[i]);
 	 	}
@@ -538,17 +549,19 @@ void report(char *msg)
 	Serial.println(FG_CYAN);
 
 	avg = 0;
-
-	for(int i = 1; i < BUCKET_SIZE-1; i++)
+	k = 0;
+	
+	for(int i = 1; i < BUCKET_SIZE-2; i++)
 	{
+		k++;
  		avg += bucketHi[i];
  		avg += bucketLo[i];
 	}
-	avg /= (BUCKET_SIZE-2) * 2;
+	avg /= k * 2;
 	
-	for(int i = 1; i < BUCKET_SIZE-1; i++)
+	for(int i = 0; i < BUCKET_SIZE; i++)
 	{
-		if ((bucketHi[i] + bucketLo[i]) > avg /3)
+		if (1 || (bucketHi[i] + bucketLo[i]) > avg /3  || !i)
 		{
 	 		Serial.printf("%05d ", bucketHi[i]+bucketLo[i]);
 	 	}
@@ -567,31 +580,38 @@ void report(char *msg)
 // === ISR ===
 void My_ISR()
 {
+	uint16_t idx;
     unsigned long now = micros();
 
 	bool pinState = digitalRead(DI02);
+	
     unsigned long duration = now - lastTime;
-	lastTime = now;
     
     isrCtr++;
 
+/*
+	testing
+	idx = map(500, LIM_LO, LIM_HI, 1, BUCKET_SIZE-2);
+	bucketHi[idx] += 20;
+
+	idx = map(300, LIM_LO, LIM_HI, 1, BUCKET_SIZE-2);
+	bucketLo[idx] += 5;
+*/	
+	
 	//--------------
 	if (!bStopRecording)
 	{
 		if (duration >= LIM_LO && duration <= LIM_HI)
 		{
-			uint16_t idx;
 			idx = map(duration, LIM_LO, LIM_HI, 1, BUCKET_SIZE-2);
 			if (!pinState)
 			{
 				bucketHi[idx]++;
+				assert(0);
 			}
 			else
 			{
-				#ifdef TESTING
-					// test!!! bucket force every low to the 800 bucket
-					idx = map(800, LIM_LO, LIM_HI, 1, BUCKET_SIZE-2);
-				#endif
+				assert(0);
 				bucketLo[idx]++;
 			}
 		}
@@ -611,19 +631,21 @@ void My_ISR()
 		}
 	}
 	//--------------
-
+	
 
     //if (pinState == HIGH)  // just went hi, so time represents lo time.
     {
-        if (now - lastTime > 1500)
+        if (now - lastTime > 30000)
         {
             state = RESET;
             syncpulses = 0;
             pulsecnt = 0;
+			lastTime = now;
 			return;
         }
-
     }
+
+	lastTime = now;
 	
 
 	
@@ -744,7 +766,7 @@ void findFloor(void)
 
 	assert(squelch != 0xFF);  // couldn't find value. bail
 	
-	squelchLast++;
+	//squelchLast++;
 	Serial.printf("\n %d < %d < %d\n", squelchFirst, squelchMax, squelchLast);
 	
 	// back to real channel.
@@ -753,7 +775,8 @@ void findFloor(void)
 	state = radio.setFrequency(currentFreq);
     RADIOLIB_STATE(state, "setFrequency");
 
-	state = radio.setOokFixedOrFloorThreshold(squelchLast + 1); 
+	//state = radio.setOokFixedOrFloorThreshold(squelchLast); 
+	state = radio.setOokFixedOrFloorThreshold(squelchMax); 
     RADIOLIB_STATE(state, "setOokFixedOrFloorThreshold");
 
 	// floor is set for PEAK to gently fall onto 
@@ -796,14 +819,14 @@ void RadioSetupRx()
     state = radio.setBitRate(.5);
     RADIOLIB_STATE(state, "setBitRate");
 
-	state = radio.setGain(3); //0=autogain 1=max 6=low
+	state = radio.setGain(1); //0=autogain 1=max 6=low
     RADIOLIB_STATE(state, "setGain(max)");
 	
     // set function that will be called each time a bit is received
-    radio.setDirectAction(My_ISR);
+    //radio.setDirectAction(My_ISR);
 
-	//state = radio.setBandwidth(RUNNING_BW);  // lora only :(
-    ////RADIOLIB_STATE(state, "running bw" );
+	state = radio.setRxBandwidth(RUNNING_BW);
+    RADIOLIB_STATE(state, "running bw" );
 	
     // start direct mode reception
     state = radio.receiveDirect();

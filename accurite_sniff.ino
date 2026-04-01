@@ -39,12 +39,26 @@ SX1276 radio = new Module(NSS,      /*NSS*/
 const int DI02 = 25;
 //------------------------------------------------------------------
 #define BUCKET_SIZE 20
-volatile uint16_t bucketHi[BUCKET_SIZE];
-volatile uint16_t bucketLo[BUCKET_SIZE];
+uint16_t bucketHi[BUCKET_SIZE];
+uint16_t bucketLo[BUCKET_SIZE];
 bool bStopRecording = false;
 
-#define LIM_LO 100
-#define LIM_HI 900
+#define STAT_LIMIT_LO 100
+#define STAT_LIMIT_HI 900
+
+#ifdef LEGACY
+    // original time defs for a logic 1 or 0        
+    #define LEFT_LO		175
+    #define RIGHT_LO	250
+    #define LEFT_HI		375
+    #define RIGHT_HI	450
+#else
+    // original time defs for a logic 1 or 0		
+    #define LEFT_LO 	242
+    #define RIGHT_LO	335
+    #define LEFT_HI 	383
+    #define RIGHT_HI	476
+#endif
 
 uint8_t calculatedFloor = 2;
 
@@ -297,6 +311,10 @@ void setup()
     lprintf("WeatherSys");
     M5.Lcd.setCursor(5, 1);
     lprintf("Starting");
+
+    
+	M5.Speaker.setVolume(25);
+	
     delay(1500);
     M5.Lcd.clear();
 
@@ -335,7 +353,6 @@ void setup()
 	//beacon();      //do not transmit into the rtl+antenna
 
 	
-    report("ok");
     RadioSetupRx();
     findFloor();
 
@@ -354,6 +371,10 @@ void setup()
     }
     Serial.printf("pass: DI02 %d samples in %d ms\n", isrCtr, millis() - now);  
 */
+
+	memset(bucketHi, 0, sizeof(bucketHi));
+	memset(bucketLo, 0, sizeof(bucketLo));
+	
     Serial.println("**** end of setup ****\n");
     
 }
@@ -413,9 +434,12 @@ void loop()
 		detachInterrupt(digitalPinToInterrupt(DI02));
         bool valid = acurite_crc(buf, sizeof(buf));
 
+
+		M5.Speaker.tone(900, 100, 10);
+		
         if (valid)
         {
-			M5.Speaker.tone(1400, 100);
+			M5.Speaker.tone(1800, 100, 30);
 			
             int msgtype = (buf[2] & 0x3F);
 
@@ -498,14 +522,14 @@ void report(char *msg)
 	for(int i = 0; i < BUCKET_SIZE; i++)
 	{
 		//reverse map to show bucket windows.
- 		uint16_t undo = map(i, 1, BUCKET_SIZE-2, LIM_LO, LIM_HI);
+ 		uint16_t undo = map(i, 1, BUCKET_SIZE-2, STAT_LIMIT_LO, STAT_LIMIT_HI);
 		Serial.printf(" %4d  ", undo+1);
 	}
 	Serial.println();
 	for(int i = 0; i < BUCKET_SIZE; i++)
 	{
 		//reverse map to show bucket windows.
- 		uint16_t undo = map(i, 1, BUCKET_SIZE-2, LIM_LO, LIM_HI);
+ 		uint16_t undo = map(i, 1, BUCKET_SIZE-2, STAT_LIMIT_LO, STAT_LIMIT_HI);
 		Serial.printf(" -%4d ", undo);
 	}
 	
@@ -612,19 +636,19 @@ void My_ISR()
 
 /*
 	testing
-	idx = map(500, LIM_LO, LIM_HI, 1, BUCKET_SIZE-2);
+	idx = map(500, STAT_LIMIT_LO, STAT_LIMIT_HI, 1, BUCKET_SIZE-2);
 	bucketHi[idx] += 20;
 
-	idx = map(300, LIM_LO, LIM_HI, 1, BUCKET_SIZE-2);
+	idx = map(300, STAT_LIMIT_LO, STAT_LIMIT_HI, 1, BUCKET_SIZE-2);
 	bucketLo[idx] += 5;
 */	
 	
 	//--------------
 	if (!bStopRecording)
 	{
-		if (duration >= LIM_LO && duration <= LIM_HI)
+		if (duration >= STAT_LIMIT_LO && duration <= STAT_LIMIT_HI)
 		{
-			idx = map(duration, LIM_LO, LIM_HI, 1, BUCKET_SIZE-2);
+			idx = map(duration, STAT_LIMIT_LO, STAT_LIMIT_HI, 1, BUCKET_SIZE-2);
 			if (!pinState)
 			{
 				bucketHi[idx]++;
@@ -639,13 +663,13 @@ void My_ISR()
 			// out of bounds.
 			if (!pinState)
 			{
-				if (duration > LIM_HI) bucketHi[BUCKET_SIZE-1]++;
-				if (duration < LIM_LO) bucketHi[0]++;
+				if (duration > STAT_LIMIT_HI) bucketHi[BUCKET_SIZE-1]++;
+				if (duration < STAT_LIMIT_LO) bucketHi[0]++;
 			}
 			else
 			{
-				if (duration > LIM_HI) bucketLo[BUCKET_SIZE-1]++;
-				if (duration < LIM_LO) bucketLo[0]++;
+				if (duration > STAT_LIMIT_HI) bucketLo[BUCKET_SIZE-1]++;
+				if (duration < STAT_LIMIT_LO) bucketLo[0]++;
 			}
 		}
 	}
@@ -708,12 +732,12 @@ void My_ISR()
         byte bytepos = pulsecnt / 8;
         byte bitpos = 7 - (pulsecnt % 8);
 
-        if (duration > 375 && duration < 450)
+        if (duration > LEFT_HI && duration < RIGHT_HI)
         {
             bitSet(buf[bytepos], bitpos);
             pulsecnt++;
         }
-        else if (duration > 175 && duration < 250)
+        else if (duration > LEFT_LO && duration < RIGHT_LO)
         {
             bitClear(buf[bytepos], bitpos);
             pulsecnt++;
@@ -797,11 +821,15 @@ void findFloor(void)
     RADIOLIB_STATE(state, "setFrequency");
 
 	calculatedFloor = squelchLast;
+	calculatedFloor += 12; // extra X half dbs
+	
 	Serial.printf(FG_RED"\ntaking %d as squelch setting \n"FG_DONE, calculatedFloor);
 
-	state = radio.setOokFixedOrFloorThreshold(squelchMiddle); 
-	//state = radio.setOokFixedOrFloorThreshold(squelchMiddle); 
+	state = radio.setOokFixedOrFloorThreshold(calculatedFloor); 
     RADIOLIB_STATE(state, "setOokFixedOrFloorThreshold");
+
+	state = radio.setOokThresholdType(RADIOLIB_SX127X_OOK_THRESH_FIXED);
+	RADIOLIB_STATE(state, "setOokThresholdType");
 
 	// floor is set for PEAK to gently fall onto 
 	// set mode to go from fixed (find floor) to PEAK mode
@@ -830,11 +858,7 @@ void RadioSetupRx()
     state = radio.setOokFixedOrFloorThreshold(
         calculatedFloor);
     RADIOLIB_STATE(state, "calculatedFloor");
-
-	state = radio.setOokFixedOrFloorThreshold(
-		calculatedFloor);
-	RADIOLIB_STATE(state, "calculatedFloor");
-
+ 
 	state = radio.disableBitSync();
 	RADIOLIB_STATE(state, "disableBitSync");
 

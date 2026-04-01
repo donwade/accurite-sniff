@@ -46,13 +46,19 @@ bool bStopRecording = false;
 #define LIM_LO 100
 #define LIM_HI 900
 
-#define iRUNNING_FREQ (433910000 - 2300 + 1400)
+
+
+#define iRUNNING_FREQ (433948200 - 2100)     // GOLD
+
+//#define iRUNNING_FREQ (433943700 - 2100)     // CONSTANT tx
+//#define iRUNNING_FREQ (433928000 - 2100)
+//#define iRUNNING_FREQ (433910000 - 2300 + 1400)
 #define RUNNING_FREQ ((float)(iRUNNING_FREQ)/1000000.)
 
 // Allowed values are 7.8, 10.4, 15.6, 20.8, 31.25, 41.7, 62.5, 125, 250 and 500 kHz
-#define RUNNING_BW  15.6 //31.25 //250. //10.4
+#define RUNNING_BW  7.8  //15.6 //250. //15.6 //31.25 //250. //10.4
 
-#define CAL_FREQUENCY (RUNNING_FREQ- .008000)
+#define CAL_FREQUENCY (RUNNING_FREQ + .008000)
 float currentFreq = RUNNING_FREQ;
 
 
@@ -310,7 +316,7 @@ void setup()
 	M5.Power.setExtPower(false); // TIP
 	delay(1000);
 	M5.Power.setExtPower(true);  // TIP
-	
+	delay(1000);
 
     int state = radio.beginFSK(434.0,           // freq
                                .5,             // bitrate
@@ -325,7 +331,7 @@ void setup()
 
 
 	///RadioSetupTx();
-	// beacon();      do not transmit into the rtl+antenna
+	//beacon();      //do not transmit into the rtl+antenna
 	
     RadioSetupRx();
     findFloor();
@@ -757,7 +763,7 @@ void findFloor(void)
 		}
 
 		
-		Serial.printf("%6d %d < %d < %d\n", squelch, squelchFirst, squelchMax, squelchLast);
+		Serial.printf("%6d %d < %d < %d cnt=%d\n", squelch, squelchFirst, squelchMax, squelchLast, isrCtr);
 		//Serial.printf("isrCtr=%d squelchMax=%d\n", isrCtr, squelchMax);
 
 		if (isrCtr == 0 && intCtrMax != 0) break;  //done
@@ -766,8 +772,8 @@ void findFloor(void)
 
 	assert(squelch != 0xFF);  // couldn't find value. bail
 	
-	//squelchLast++;
-	Serial.printf("\n %d < %d < %d\n", squelchFirst, squelchMax, squelchLast);
+	squelchLast++;
+	Serial.printf("\n %d < %d < %d\n", squelchFirst, squelchLast, squelchLast);
 	
 	// back to real channel.
 	currentFreq = RUNNING_FREQ;
@@ -775,8 +781,8 @@ void findFloor(void)
 	state = radio.setFrequency(currentFreq);
     RADIOLIB_STATE(state, "setFrequency");
 
-	//state = radio.setOokFixedOrFloorThreshold(squelchLast); 
 	state = radio.setOokFixedOrFloorThreshold(squelchMax); 
+	//state = radio.setOokFixedOrFloorThreshold(squelchMax); 
     RADIOLIB_STATE(state, "setOokFixedOrFloorThreshold");
 
 	// floor is set for PEAK to gently fall onto 
@@ -843,6 +849,7 @@ void RadioSetupTx()
 	M5.Power.setExtPower(false); // TIP
 	delay(1000);
 	M5.Power.setExtPower(true);  // TIP
+	delay(1000);
 	
 
     // initialize SX1278 with FSK modem at 9600 bps

@@ -614,11 +614,9 @@ void My_ISR()
 			if (!pinState)
 			{
 				bucketHi[idx]++;
-				assert(0);
 			}
 			else
 			{
-				assert(0);
 				bucketLo[idx]++;
 			}
 		}
@@ -819,6 +817,13 @@ void RadioSetupRx()
         calculatedFloor);
     RADIOLIB_STATE(state, "calculatedFloor");
 
+	state = radio.setOokFixedOrFloorThreshold(
+		calculatedFloor);
+	RADIOLIB_STATE(state, "calculatedFloor");
+
+	state = radio.disableBitSync();
+	RADIOLIB_STATE(state, "disableBitSync");
+
 #if 0
     state = radio.setOokPeakThresholdDecrement(
         RADIOLIB_SX127X_OOK_PEAK_THRESH_DEC_1_1_CHIP);     // default
@@ -829,8 +834,8 @@ void RadioSetupRx()
     RADIOLIB_STATE(state, "Ook Peak Threshold Step");
 #endif
 
-    state = radio.setBitRate(.5);
-    RADIOLIB_STATE(state, "setBitRate");
+    //state = radio.setBitRate(100);
+    //RADIOLIB_STATE(state, "setBitRate");
 
 	state = radio.setGain(1); //0=autogain 1=max 6=low
     RADIOLIB_STATE(state, "setGain(max)");
@@ -841,6 +846,7 @@ void RadioSetupRx()
 	state = radio.setRxBandwidth(RUNNING_BW);
     RADIOLIB_STATE(state, "running bw" );
 	
+   
     // start direct mode reception
     state = radio.receiveDirect();
     RADIOLIB_STATE(state, "receiveDirect");

@@ -46,7 +46,7 @@ bool bStopRecording = false;
 #define LIM_LO 100
 #define LIM_HI 900
 
-
+uint8_t calculatedFloor = 2;
 
 #define iRUNNING_FREQ (433948200 - 2100)     // GOLD
 
@@ -108,10 +108,11 @@ float latestTemperature = -1000;    // sentinel invalid temp (C)
 // Timing for LCD updates
 unsigned long lastLcdUpdate = 0;
 const unsigned long lcdUpdateInterval = 1000; // ms
+
+
 // === Helper Functions ===
 
-#define OOK_FIXED_THRESHOLD 15
-#define RADIOLIB_STATE(STATEVAR, FUNCTION)                              \
+ #define RADIOLIB_STATE(STATEVAR, FUNCTION)                              \
         {                                                                     \
             if ((STATEVAR) == RADIOLIB_ERR_NONE) {                              \
                 Serial.printf(" " FUNCTION " - success!\n");     \
@@ -721,7 +722,7 @@ void My_ISR()
 void findFloor(void)
 {
 	uint32_t intCtrMax = 0;
-	uint8_t  squelchMax = 0;
+	uint8_t  squelchMiddle = 0;
 
  	uint8_t  squelchFirst = 0;
 
@@ -759,12 +760,12 @@ void findFloor(void)
 		if (isrCtr > intCtrMax) 
 		{
 			intCtrMax = isrCtr;
-			squelchMax = squelch;
+			squelchMiddle = squelch;
 		}
 
 		
-		Serial.printf("%6d %d < %d < %d cnt=%d\n", squelch, squelchFirst, squelchMax, squelchLast, isrCtr);
-		//Serial.printf("isrCtr=%d squelchMax=%d\n", isrCtr, squelchMax);
+		Serial.printf("%6d %d < %d < %d cnt=%d\n", squelch, squelchFirst, squelchMiddle, squelchLast, isrCtr);
+		//Serial.printf("isrCtr=%d squelchMiddle=%d\n", isrCtr, squelchMiddle);
 
 		if (isrCtr == 0 && intCtrMax != 0) break;  //done
 				
@@ -773,7 +774,9 @@ void findFloor(void)
 	assert(squelch != 0xFF);  // couldn't find value. bail
 	
 	squelchLast++;
-	Serial.printf("\n %d < %d < %d\n", squelchFirst, squelchLast, squelchLast);
+
+	// Middle is one with most noise, first and last have least.
+	Serial.printf("\n %d < %d < %d\n", squelchFirst, squelchMiddle, squelchLast );
 	
 	// back to real channel.
 	currentFreq = RUNNING_FREQ;
@@ -781,21 +784,23 @@ void findFloor(void)
 	state = radio.setFrequency(currentFreq);
     RADIOLIB_STATE(state, "setFrequency");
 
-	state = radio.setOokFixedOrFloorThreshold(squelchMax); 
-	//state = radio.setOokFixedOrFloorThreshold(squelchMax); 
+	calculatedFloor = squelchMiddle;
+	Serial.printf("taking %d as squelch setting \n", calculatedFloor);
+
+	state = radio.setOokFixedOrFloorThreshold(squelchMiddle); 
+	//state = radio.setOokFixedOrFloorThreshold(squelchMiddle); 
     RADIOLIB_STATE(state, "setOokFixedOrFloorThreshold");
 
 	// floor is set for PEAK to gently fall onto 
 	// set mode to go from fixed (find floor) to PEAK mode
-	state = radio.setOokThresholdType(RADIOLIB_SX127X_OOK_THRESH_PEAK);
-	RADIOLIB_STATE(state, "setOokThresholdType");
+	// state = radio.setOokThresholdType(RADIOLIB_SX127X_OOK_THRESH_PEAK);
+	// RADIOLIB_STATE(state, "setOokThresholdType");
 
-	
     
 }
 //-------------------------------------------------------------
 
-uint8_t OokFixedThreshold = OOK_FIXED_THRESHOLD;
+
 void RadioSetupRx()
 {
 	pinMode(DI02, INPUT);
@@ -807,9 +812,14 @@ void RadioSetupRx()
     RADIOLIB_STATE(state, "setDataShapingOOK");
 
     state = radio.setOokThresholdType(
-        RADIOLIB_SX127X_OOK_THRESH_PEAK);     // Peak is default
-    RADIOLIB_STATE(state, "OOK Thresh PEAK");
+        RADIOLIB_SX127X_OOK_THRESH_FIXED);
+    RADIOLIB_STATE(state, "OOK Thresh FIXED");
 
+    state = radio.setOokFixedOrFloorThreshold(
+        calculatedFloor);
+    RADIOLIB_STATE(state, "calculatedFloor");
+
+#if 0
     state = radio.setOokPeakThresholdDecrement(
         RADIOLIB_SX127X_OOK_PEAK_THRESH_DEC_1_1_CHIP);     // default
     RADIOLIB_STATE(state, "OOK PEAK Thresh Decrement");
@@ -817,10 +827,7 @@ void RadioSetupRx()
     state = radio.setOokPeakThresholdStep(
         RADIOLIB_SX127X_OOK_PEAK_THRESH_STEP_0_5_DB);     // default
     RADIOLIB_STATE(state, "Ook Peak Threshold Step");
-
-    state = radio.setOokFixedOrFloorThreshold(
-        OokFixedThreshold);     // Default 0x0C RADIOLIB_SX127X_OOK_FIXED_THRESHOLD
-    RADIOLIB_STATE(state, "OokFixedThreshold");
+#endif
 
     state = radio.setBitRate(.5);
     RADIOLIB_STATE(state, "setBitRate");

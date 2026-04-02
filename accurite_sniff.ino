@@ -5,6 +5,7 @@
 #include <M5Unified.h>
 #include <M5GFX.h>
 #include "DisplayPage.hpp"
+#include <FastLED.h>
 
 #define LINE Serial.printf("%s:%d %s\n", __FILE__,__LINE__,__FUNCTION__)
 
@@ -22,8 +23,6 @@ void RadioSetupRx();
 // include the library
 #include <RadioLib.h>
 
-uint16_t soundBeep = 0;
-
 // SX1276 has the following connections:
 #define NSS     27
 #define DIO0    -1
@@ -38,7 +37,7 @@ SX1276 radio = new Module(NSS,      /*NSS*/
 
 const int DI02 = 25;
 //------------------------------------------------------------------
-#define BUCKET_SIZE 20
+#define BUCKET_SIZE 16
 uint16_t bucketHi[BUCKET_SIZE];
 uint16_t bucketLo[BUCKET_SIZE];
 bool bStopRecording = false;
@@ -52,12 +51,17 @@ bool bStopRecording = false;
     #define RIGHT_LO	250
     #define LEFT_HI		375
     #define RIGHT_HI	450
+	#define TSYNC_LO	575
+	#define TSYNC_HI	675
 #else
     // original time defs for a logic 1 or 0		
-    #define LEFT_LO 	242
-    #define RIGHT_LO	335
-    #define LEFT_HI 	383
-    #define RIGHT_HI	476
+    #define LEFT_LO 	224
+    #define RIGHT_LO	284
+    #define LEFT_HI 	347
+    #define RIGHT_HI	469
+    #define TSYNC_LO 	531
+    #define TSYNC_HI 	592
+	
 #endif
 
 uint8_t calculatedFloor = 2;
@@ -95,9 +99,9 @@ const float winddirections[] = { 315.0, 247.5, 292.5, 270.0,
 #define MT_WS_T_RH   56
 
 // Variables for decoding
-volatile unsigned int pulsecnt = 0;
+volatile unsigned int dataCtr = 0;
 volatile unsigned long lastTime = 0;
-volatile unsigned int syncpulses = 0;
+volatile unsigned int syncCtr = 0;
 volatile byte state = 0;
 volatile byte buf[8] = { 0 };
 volatile bool bucketFull = false;
@@ -148,15 +152,21 @@ String degreesToCompass(float degrees)
 }
 
 
-bool acurite_crc(volatile byte row[], int cols)
+bool acurite_crc(volatile byte pkt[], int cols)
 {
+	int i;
     cols -= 1; // last byte is CRC
     int sum = 0;
 
-    for (int i = 0; i < cols; i++)
-        sum += row[i];
+    for (i = 0; i < cols; i++)
+    {	
+    	sum += pkt[i];
+    	Serial.printf(" pkt[%2d] = 0x%02X  run_sum = 0x%02X \n", i, pkt[i], sum);
+    }
 
-    return sum != 0 && sum % 256 == row[cols];
+	Serial.printf(" pkt.crc=0x%02X  end_sum = 0x%02X \n", pkt[i], sum % 256);
+
+    return sum != 0 && sum % 256 == pkt[cols];
 }
 
 
@@ -284,10 +294,19 @@ void beacon(void)
 	}
 }
 //---------------------------------------------------------------------
+
+#define LEDS_PIN 25
+#define LEDS_NUM 10
+ 
+static CRGB ledsBuff[LEDS_NUM];
+#define FASTLED_SHOW FastLED.show()
+
+
 // === Setup ===
 void setup()
 {
     Serial.begin(115200);
+
 
     M5.begin();
 
@@ -314,9 +333,19 @@ void setup()
 
     
 	M5.Speaker.setVolume(25);
-	
-    delay(1500);
     M5.Lcd.clear();
+
+
+	FastLED.addLeds<SK6812, LEDS_PIN>(ledsBuff, LEDS_NUM);
+   
+    // Initialize LEDs
+    FastLED.setBrightness(100);
+    
+    FastLED.showColor(CRGB::Red);
+
+    // Initial color: Off
+    FastLED.show();
+
 
     /*!
      *    \brief FSK modem initialization method. Must be called at least once from Arduino sketch to initialize the module.
@@ -356,22 +385,6 @@ void setup()
     RadioSetupRx();
     findFloor();
 
-/*
-    uint8_t pin;
-    uint8_t cnt = 100;
-    uint32_t now = millis();
-    
-    Serial.printf("waiting for DIO2 to move on %f mHz\n", currentFreq);
-
-    while (cnt)
-    {
-        pin = digitalRead(DI02);
-        while (pin == digitalRead(DI02));
-        cnt--;
-    }
-    Serial.printf("pass: DI02 %d samples in %d ms\n", isrCtr, millis() - now);  
-*/
-
 	memset(bucketHi, 0, sizeof(bucketHi));
 	memset(bucketLo, 0, sizeof(bucketLo));
 	
@@ -379,56 +392,20 @@ void setup()
     
 }
 
+//---------------------------------------------------------------
 
-#define HISTLEN 1024
-uint16_t rssiIndex = 0;
-int8_t rssiHistory[HISTLEN];
-
-float rssiHi = -999;
-float rssiLo = 0;
-
-
-// === Main Loop ===
 void loop()
 {
 	yield();
-#if 0
-	// NO NO NO 
-    float rssiNow = radio.getRSSI();
-	
-    if (rssiHi < rssiNow)
-        rssiHi = rssiNow;
-
-    if (rssiLo > rssiNow)
-        rssiLo = rssiNow;
-
-    rssiHistory[rssiIndex++] = rssiNow;
-
-    if (rssiIndex == HISTLEN)
-    {
-        rssiIndex = 0;
-        Serial.printf("rssi Hi = %6.1f Lo = %6.1f Delta = %5.1f\n", rssiHi, rssiLo, rssiHi - rssiLo);
-
-		rssiHi = -999;
-		rssiLo = 0;
-    }
-#endif
 
 	static uint32_t lastPC;
 	if (millis() >= lastPC) 
 	{
-		//Serial.printf("%d vs %d \n", pulsecnt, lastPC);
+		//Serial.printf("%d vs %d \n", dataCtr, lastPC);
 		report("STATS");
 		lastPC = millis() + 5000;
 	}
-	
-
-	if (soundBeep)
-	{
-		M5.Speaker.tone(soundBeep, 100);
-		soundBeep = 0;
-	}
-	
+		
     if (bucketFull)
     {
 		detachInterrupt(digitalPinToInterrupt(DI02));
@@ -467,6 +444,7 @@ void loop()
 
         }
         
+        dataCtr = 0;
 		bucketFull = false;
 		state == RESET;
 		
@@ -678,69 +656,68 @@ void My_ISR()
 
     //if (pinState == HIGH)  // just went hi, so time represents lo time.
     {
-        if (now - lastTime > 30000)
+        if (now - lastTime > 10000)
         {
             state = RESET;
-            syncpulses = 0;
-            pulsecnt = 0;
+            syncCtr = 0;
+            dataCtr = 0;
 			lastTime = now;
 			return;
         }
     }
 
 	lastTime = now;
-	
 
+	if (bucketFull) return;	// wait for loop to handle it.
 	
-
     if (state == RESET || state == INSYNC)
     {
 		
-        if (duration > 575 && duration < 675)
+        if (duration > TSYNC_LO && duration < TSYNC_HI)
         {
             state = INSYNC;
-            syncpulses++;
+            syncCtr++;
 
-            if (syncpulses > 3)
+            if (syncCtr > 3)
             {
                 state = SYNCDONE;
-                syncpulses = 0;
-                pulsecnt = 0;
+                syncCtr = 0;
+                dataCtr = 0;
             }
 
             return;
         }
         else
         {
-            syncpulses = 0;
-            pulsecnt = 0;
+            syncCtr = 0;
+            dataCtr = 0;
             state = RESET;
             return;
         }
     }
     else
     {
-        if (pulsecnt > MAXBITS)
+        if (dataCtr > MAXBITS)
         {
             state = RESET;
-            pulsecnt = 0;
+            dataCtr = 0;
             
             bucketFull = true;
             return;
         }
 
-        byte bytepos = pulsecnt / 8;
-        byte bitpos = 7 - (pulsecnt % 8);
+        byte bytepos = dataCtr / 8;
+        byte bitpos = 7 - (dataCtr % 8);
 
         if (duration > LEFT_HI && duration < RIGHT_HI)
         {
             bitSet(buf[bytepos], bitpos);
-            pulsecnt++;
+            dataCtr++;
         }
         else if (duration > LEFT_LO && duration < RIGHT_LO)
         {
             bitClear(buf[bytepos], bitpos);
-            pulsecnt++;
+            dataCtr++;
         }
     }
 }

@@ -2,10 +2,13 @@
 //#include <LiquidCrystal_I2C.h>
 //#include <avr/eeprom.h>
 
-#include <M5Unified.h>
+//#include <M5Unified.h>
+#include <_m5Core2-only.h>
+#include <FastLED.h>
 #include <M5GFX.h>
 #include "DisplayPage.hpp"
-#include <FastLED.h>
+
+#include "_viewController.h"
 
 #define LINE Serial.printf("%s:%d %s\n", __FILE__,__LINE__,__FUNCTION__)
 
@@ -35,7 +38,7 @@ SX1276 radio = new Module(NSS,      /*NSS*/
                           DIO1      /*DIO1*/
                           );
 
-const int DI02 = 25;
+const int DI02 = 25; 	// don't enable LEDBAR, it uses 25 too!
 //------------------------------------------------------------------
 #define BUCKET_SIZE 16
 uint16_t bucketHi[BUCKET_SIZE];
@@ -295,21 +298,16 @@ void beacon(void)
 }
 //---------------------------------------------------------------------
 
-#define LEDS_PIN 25
-#define LEDS_NUM 10
- 
-static CRGB ledsBuff[LEDS_NUM];
-#define FASTLED_SHOW FastLED.show()
-
-
 // === Setup ===
 void setup()
 {
     Serial.begin(115200);
 
+	_setup_M5();
+    // _setup_lightbar(); cannot use as lb uses GPIO25 as well :(
 
+/*	
     M5.begin();
-
 	auto cfg = M5.config();
 	
 	// Set the items you want to configure. Omit the following two lines if you use the default settings.
@@ -317,7 +315,7 @@ void setup()
 	cfg.output_power = true;
 	
 	M5.begin(cfg);
-
+*/
     
     M5.Lcd.init();
     M5.Lcd.clear();
@@ -334,17 +332,6 @@ void setup()
     
 	M5.Speaker.setVolume(25);
     M5.Lcd.clear();
-
-
-	FastLED.addLeds<SK6812, LEDS_PIN>(ledsBuff, LEDS_NUM);
-   
-    // Initialize LEDs
-    FastLED.setBrightness(100);
-    
-    FastLED.showColor(CRGB::Red);
-
-    // Initial color: Off
-    FastLED.show();
 
 
     /*!
@@ -397,7 +384,8 @@ void setup()
 void loop()
 {
 	yield();
-
+	_loop_M5();
+	
 	static uint32_t lastPC;
 	if (millis() >= lastPC) 
 	{

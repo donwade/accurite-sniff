@@ -524,7 +524,9 @@ void report(char *msg)
 	uint64_t std2 = 0;
 	uint64_t std3 = 0;
 		
-
+	uint32_t slice1;
+	uint32_t slice2;
+	
 	// end buckets don't get averaged
 
 	// avg ---- bucketHi ---------------------------------
@@ -546,10 +548,11 @@ void report(char *msg)
 	
 	std1 = sqrt(std1/k);
 	std1 /= 2;  // make window 
+	slice1 = avg1 + std1 * 9 / 32; 
 
 	for(int i = 0; i < BUCKET_SIZE; i++)
 	{
-		if ( bucketHi[i] > (avg1 + std1) )
+		if ( bucketHi[i] > slice1 )
 		{
 	 		Serial.printf(FG_RED " %5d ", bucketHi[i]);
 	 	}
@@ -583,10 +586,11 @@ void report(char *msg)
 
 	std2 = sqrt(std2/k);
 	std2 /= 2;  // make window 
+	slice2 = avg2 + std2 * 9 / 32; 
 	
 	for(int i = 0; i < BUCKET_SIZE; i++)
 	{
-		if ( bucketLo[i] > (avg2 + std2) )
+		if ( bucketLo[i] > slice2 )
 		{
 	 		Serial.printf(FG_GREEN " %5d ", bucketLo[i]);
 	 	}
@@ -599,8 +603,8 @@ void report(char *msg)
 
 	Serial.println(FG_DONE);
 	
-	Serial.printf(FG_YELLOW "hi avg = %d +/- std = %d\n", avg1, (int) std1);
-	Serial.printf(FG_YELLOW "lo avg = %d +/- std = %d\n", avg2, (int) std2);
+	Serial.printf(FG_RED   "hi avg = %d +/- std = %d slice = %d\n", avg1, (int) std1, slice1);
+	Serial.printf(FG_GREEN "lo avg = %d +/- std = %d slice = %d\n", avg2, (int) std2, slice2);
 	Serial.println();
 }
 

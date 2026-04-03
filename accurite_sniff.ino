@@ -100,7 +100,7 @@ const float winddirections[] = { 315.0, 247.5, 292.5, 270.0,
 
 // Variables for decoding
 volatile unsigned int dataCtr = 0;
-volatile unsigned long lastTime = 0;
+volatile unsigned long noiseGate = 0;
 volatile unsigned int syncCtr = 0;
 volatile byte state = 0;
 volatile byte buf[8] = { 0 };
@@ -336,6 +336,7 @@ void setup()
     M5.Lcd.clear();
 
 
+#if 0 // cant use GPIO25 used by DIO2
 	FastLED.addLeds<SK6812, LEDS_PIN>(ledsBuff, LEDS_NUM);
    
     // Initialize LEDs
@@ -345,7 +346,7 @@ void setup()
 
     // Initial color: Off
     FastLED.show();
-
+#endif
 
     /*!
      *    \brief FSK modem initialization method. Must be called at least once from Arduino sketch to initialize the module.
@@ -492,10 +493,11 @@ void loop()
 }
 
 //==============================================================
+ 
 void report(char *msg)
 {
 	int k;
-	Serial.printf(FG_YELLOW "\n%s ----- %d \n", msg, isrCtr);
+	Serial.printf(FG_CYAN"\n%s ----- %d \n", msg, isrCtr);
 	Serial.printf("  %4d  ", 0);
 	for(int i = 0; i < BUCKET_SIZE; i++)
 	{
@@ -510,8 +512,9 @@ void report(char *msg)
  		uint16_t undo = map(i, 1, BUCKET_SIZE-2, STAT_LIMIT_LO, STAT_LIMIT_HI);
 		Serial.printf(" -%4d ", undo);
 	}
+	Serial.println();
+
 	
-	Serial.println(FG_RED);
 
 	uint32_t avg1 = 0;
 	uint32_t avg2 = 0;
@@ -521,11 +524,12 @@ void report(char *msg)
 	uint64_t std2 = 0;
 	uint64_t std3 = 0;
 		
-	k = 0;
 
 	// end buckets don't get averaged
 
-	// avg ---- bucketHi ----------------
+	// avg ---- bucketHi ---------------------------------
+	k = 0;
+
 	for(int i = 1; i < BUCKET_SIZE-2; i++)
 	{
 		k++;
@@ -542,27 +546,27 @@ void report(char *msg)
 	
 	std1 = sqrt(std1/k);
 	std1 /= 2;  // make window 
-	//Serial.printf("avg = %d +/- std = %d\n", avg1, std1/2);
-	
+
 	for(int i = 0; i < BUCKET_SIZE; i++)
 	{
-		if ( bucketHi[i] > (avg1 - std1) && bucketHi[i] < (avg1 + std1) )
+		if ( bucketHi[i] > (avg1 + std1) )
 		{
-	 		Serial.printf(" %05d ", bucketHi[i]);
+	 		Serial.printf(FG_RED " %5d ", bucketHi[i]);
 	 	}
 		else
 		{
-	 		Serial.print("       ");
+	 		Serial.printf(FG_YELLOW" %5d ", bucketHi[i]);
  		}
 		if (bucketHi[i] > 64000) bStopRecording = true;
 	}
-
 	
-	Serial.println(FG_GREEN);
+	Serial.println();
+	
+	// avg ---- bucketLo ----------------------------------
+	
 	k = 0;
 	// end buckets don't get averaged
 
-	// avg ---- bucketLo ----------------
 	for(int i = 1; i < BUCKET_SIZE-2; i++)
 	{
 		k++;
@@ -579,38 +583,51 @@ void report(char *msg)
 
 	std2 = sqrt(std2/k);
 	std2 /= 2;  // make window 
-	//Serial.printf("avg = %d +/- std = %d\n", avg2, std2/2);
-	
 	
 	for(int i = 0; i < BUCKET_SIZE; i++)
 	{
-		if ( bucketLo[i] > (avg2 - std2) && bucketLo[i] < (avg2 + std2) )
+		if ( bucketLo[i] > (avg2 + std2) )
 		{
-	 		Serial.printf(" %05d ", bucketLo[i]);
+	 		Serial.printf(FG_GREEN " %5d ", bucketLo[i]);
 	 	}
 		else
 		{
-	 		Serial.print("       ");
+	 		Serial.printf(FG_YELLOW" %5d ", bucketLo[i]);
  		}
 		if (bucketLo[i] > 64000) bStopRecording = true;
 	}
 
 	Serial.println(FG_DONE);
+	
+	Serial.printf(FG_YELLOW "hi avg = %d +/- std = %d\n", avg1, (int) std1);
+	Serial.printf(FG_YELLOW "lo avg = %d +/- std = %d\n", avg2, (int) std2);
 	Serial.println();
 }
 
+#define NOISE_GATE 16000000  //report every 18 seconds...
 
 // === ISR ===
 void My_ISR()
 {
+	static uint32_t lastIsrTime;
 	uint16_t idx;
     unsigned long now = micros();
-
+    
+	
 	bool pinState = digitalRead(DI02);
 	
-    unsigned long duration = now - lastTime;
+    unsigned long duration = now - lastIsrTime;
+    lastIsrTime = now;
     
     isrCtr++;
+
+
+	if (bucketFull) return; // wait for loop to handle it.
+
+	if (state == RESET && now < noiseGate)
+	{
+		return;
+	}
 
 /*
 	testing
@@ -652,27 +669,12 @@ void My_ISR()
 		}
 	}
 	//--------------
-	
 
-    //if (pinState == HIGH)  // just went hi, so time represents lo time.
-    {
-        if (now - lastTime > 10000)
-        {
-            state = RESET;
-            syncCtr = 0;
-            dataCtr = 0;
-			lastTime = now;
-			return;
-        }
-    }
 
-	lastTime = now;
-
-	if (bucketFull) return;	// wait for loop to handle it.
 	
     if (state == RESET || state == INSYNC)
     {
-		
+    
         if (duration > TSYNC_LO && duration < TSYNC_HI)
         {
             state = INSYNC;
@@ -703,6 +705,9 @@ void My_ISR()
             dataCtr = 0;
             
             bucketFull = true;
+            
+            noiseGate = now + NOISE_GATE;
+            
             return;
         }
 
@@ -754,7 +759,7 @@ void findFloor(void)
 	{
 		state = radio.setOokFixedOrFloorThreshold(squelch); 
 		
-		Serial.printf("F=%f mHz BW=%.1f squelch %d " , currentFreq, RUNNING_BW * 1000., squelch);
+		Serial.printf("F=%f mHz BW=%.1f squelch %3d " , currentFreq, RUNNING_BW * 1000., squelch);
 
 		uint32_t now = millis();
 		isrCtr = 0;
@@ -777,7 +782,7 @@ void findFloor(void)
 		}
 
 		
-		Serial.printf("%6d %d < %d < %d cnt=%d\n", squelch, squelchFirst, squelchMiddle, squelchLast, isrCtr);
+		Serial.printf("%2d < %2d < %2d cnt=%5d\n", squelchFirst, squelchMiddle, squelchLast, isrCtr);
 		//Serial.printf("isrCtr=%d squelchMiddle=%d\n", isrCtr, squelchMiddle);
 
 		if (isrCtr == 0 && intCtrMax != 0) break;  //done
@@ -797,8 +802,8 @@ void findFloor(void)
 	state = radio.setFrequency(currentFreq);
     RADIOLIB_STATE(state, "setFrequency");
 
-	calculatedFloor = squelchLast;
-	calculatedFloor += 12; // extra X half dbs
+	// SLICE AT NOISIEST POINT !!! this give symetrical HI and LO stats.
+	calculatedFloor = squelchMiddle; //squelchLast;
 	
 	Serial.printf(FG_RED"\ntaking %d as squelch setting \n"FG_DONE, calculatedFloor);
 
